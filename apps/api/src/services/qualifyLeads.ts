@@ -31,6 +31,7 @@ function getClient(): OpenAI {
 export const qualificationSchema = z.object({
   fitScore: z.enum(["strong_fit", "possible_fit", "poor_fit"]),
   reasoning: z.string(),
+  opener: z.string().nullable(),
 });
 
 export type Qualification = z.infer<typeof qualificationSchema>;
@@ -40,23 +41,35 @@ export function normalizeOffering(offering: string): string {
   return offering.trim().toLowerCase();
 }
 
-const SYSTEM_PROMPT = `You judge whether a business is a good sales lead for a specific offering, based only on the facts given about it. Never invent details you weren't given — e.g. don't claim their website "looks outdated" if you were only told whether one exists.
+const SYSTEM_PROMPT = `You judge whether a business is a good sales lead for a specific offering, and draft a short cold-outreach opening line for it — based only on the facts given about the business. Never invent details you weren't given — e.g. don't claim their website "looks outdated" if you were only told whether one exists, and never invent a person's name if none was given.
 
 Score:
 - "strong_fit": the business's situation clearly matches a real need for the offering (e.g. an offering about building websites, and the business has no website at all).
 - "possible_fit": plausible, but the given facts don't clearly confirm or rule it out.
 - "poor_fit": the business already appears to have this covered, or the offering doesn't plausibly apply to a business like this.
 
+The opener:
+- For "poor_fit", set opener to null. There's no good reason to draft outreach copy for a lead you're not going to contact, and forcing a pitch for an offering that doesn't fit produces incoherent copy (e.g. don't pitch a hotel partnership to a coffee shop).
+- For "strong_fit"/"possible_fit", write one to two sentences, like a real person emailing another person — not corporate or salesy. Never use "I hope this email finds you well" or "I wanted to reach out" or similar stock phrases.
+- Reference something SPECIFIC and TRUE about this business from the facts given (its name, location, or what's missing that the offering addresses) — never vague filler that could apply to any business.
+- If they already have a website, you only know that it exists — never suggest it "could use a fresh look," "needs modernizing," or any other quality judgment you have no evidence for. Ground the pitch in something else true instead (e.g. no social media presence, no email listed).
+- If an owner's name is given, you may address them by first name.
+- No greeting ("Hi," / "Dear...") and no sign-off — just the opening line(s) themselves, ready to paste into an email body.
+
 Return ONLY a JSON object, no prose, no markdown fences:
-{"fitScore": "strong_fit" | "possible_fit" | "poor_fit", "reasoning": string}
+{"fitScore": "strong_fit" | "possible_fit" | "poor_fit", "reasoning": string, "opener": string | null}
 reasoning is one sentence, grounded only in the facts given.`;
 
-type LeadFacts = Pick<Lead, "businessName" | "description" | "location" | "website" | "email" | "phone" | "socialLinks">;
+type LeadFacts = Pick<
+  Lead,
+  "businessName" | "description" | "location" | "website" | "email" | "phone" | "socialLinks" | "ownerName" | "ownerTitle"
+>;
 
 function summarizeLeadFacts(lead: LeadFacts): string {
   const socials = Object.keys(lead.socialLinks ?? {});
   return [
     `Business name: ${lead.businessName}`,
+    lead.ownerName ? `Owner/contact name: ${lead.ownerName}${lead.ownerTitle ? ` (${lead.ownerTitle})` : ""}` : null,
     lead.location ? `Location: ${lead.location}` : null,
     `Description: ${lead.description ?? "(none available)"}`,
     `Has a website: ${lead.website ? "yes" : "no"}`,
@@ -143,6 +156,7 @@ export async function runQualificationJob(jobId: string, offering: string, leadI
                   offering,
                   fitScore: result.fitScore,
                   reasoning: result.reasoning,
+                  opener: result.opener,
                 })
                 .onConflictDoNothing();
             }

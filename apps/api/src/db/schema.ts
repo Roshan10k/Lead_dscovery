@@ -136,6 +136,16 @@ export const leadQualifications = pgTable(
     offering: text("offering").notNull(),
     fitScore: text("fit_score", { enum: ["strong_fit", "possible_fit", "poor_fit"] }).notNull(),
     reasoning: text("reasoning").notNull(),
+    // A ready-to-paste cold-outreach opening line, grounded in this lead's
+    // facts and why it matched (or didn't) the offering — generated in the
+    // same LLM call as fitScore/reasoning rather than a separate pass, since
+    // it needs exactly the same context to be genuinely personalized rather
+    // than generic filler. Null for "poor_fit" — found live that forcing a
+    // pitch for a mismatched offering produces incoherent copy (e.g.
+    // pitching a hotel partnership to a coffee shop), and there's no reason
+    // to draft outreach for a lead that isn't worth contacting. See
+    // qualifyLeads.ts.
+    opener: text("opener"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({

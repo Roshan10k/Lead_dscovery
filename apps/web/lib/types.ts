@@ -102,5 +102,9 @@ export interface LeadQualification {
   offering: string;
   fitScore: FitScore;
   reasoning: string;
+  // A ready-to-paste cold-outreach opening line, grounded in this lead's
+  // facts and the qualification reasoning. Null for "poor_fit" — there's no
+  // good reason to draft outreach for a lead that isn't worth contacting.
+  opener: string | null;
   createdAt: string;
 }

@@ -5,7 +5,7 @@ import type { Lead } from "../db/schema";
 
 function fakeLead(overrides: Partial<Lead> = {}): Pick<
   Lead,
-  "businessName" | "description" | "location" | "website" | "email" | "phone" | "socialLinks"
+  "businessName" | "description" | "location" | "website" | "email" | "phone" | "socialLinks" | "ownerName" | "ownerTitle"
 > {
   return {
     businessName: "Clean Co",
@@ -15,6 +15,8 @@ function fakeLead(overrides: Partial<Lead> = {}): Pick<
     email: null,
     phone: "+61 2 9189 4164",
     socialLinks: {},
+    ownerName: null,
+    ownerTitle: null,
     ...overrides,
   };
 }
@@ -39,17 +41,35 @@ describe("normalizeOffering", () => {
 
 describe("qualificationSchema", () => {
   test("accepts a well-formed qualification", () => {
-    const result = qualificationSchema.safeParse({ fitScore: "strong_fit", reasoning: "No website found." });
+    const result = qualificationSchema.safeParse({
+      fitScore: "strong_fit",
+      reasoning: "No website found.",
+      opener: "Noticed Clean Co doesn't have a website yet.",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("accepts a null opener — the expected shape for a poor_fit lead not worth contacting", () => {
+    const result = qualificationSchema.safeParse({
+      fitScore: "poor_fit",
+      reasoning: "Not a relevant business type for this offering.",
+      opener: null,
+    });
     expect(result.success).toBe(true);
   });
 
   test("rejects an invalid fitScore value", () => {
-    const result = qualificationSchema.safeParse({ fitScore: "amazing_fit", reasoning: "..." });
+    const result = qualificationSchema.safeParse({ fitScore: "amazing_fit", reasoning: "...", opener: "..." });
     expect(result.success).toBe(false);
   });
 
   test("rejects a payload missing reasoning", () => {
-    const result = qualificationSchema.safeParse({ fitScore: "poor_fit" });
+    const result = qualificationSchema.safeParse({ fitScore: "poor_fit", opener: "..." });
+    expect(result.success).toBe(false);
+  });
+
+  test("rejects a payload missing opener", () => {
+    const result = qualificationSchema.safeParse({ fitScore: "poor_fit", reasoning: "..." });
     expect(result.success).toBe(false);
   });
 });
@@ -57,11 +77,21 @@ describe("qualificationSchema", () => {
 describe("qualifyLead", () => {
   test("returns a parsed qualification on a well-formed response", async () => {
     const createCompletion = async (_params: ChatCompletionCreateParamsNonStreaming) =>
-      completionWith(JSON.stringify({ fitScore: "strong_fit", reasoning: "No website listed for a web design offering." }));
+      completionWith(
+        JSON.stringify({
+          fitScore: "strong_fit",
+          reasoning: "No website listed for a web design offering.",
+          opener: "Noticed Clean Co doesn't have a website yet — worth a quick chat?",
+        })
+      );
 
     const result = await qualifyLead(fakeLead(), "web design services", createCompletion);
 
-    expect(result).toEqual({ fitScore: "strong_fit", reasoning: "No website listed for a web design offering." });
+    expect(result).toEqual({
+      fitScore: "strong_fit",
+      reasoning: "No website listed for a web design offering.",
+      opener: "Noticed Clean Co doesn't have a website yet — worth a quick chat?",
+    });
   });
 
   test("returns null when the response isn't valid JSON, rather than throwing", async () => {
@@ -102,7 +132,7 @@ describe("qualifyLead", () => {
     const createCompletion = async (params: ChatCompletionCreateParamsNonStreaming) => {
       const userMessage = params.messages.find((m) => m.role === "user");
       capturedContent = String(userMessage?.content ?? "");
-      return completionWith(JSON.stringify({ fitScore: "possible_fit", reasoning: "ok" }));
+      return completionWith(JSON.stringify({ fitScore: "possible_fit", reasoning: "ok", opener: "ok" }));
     };
 
     await qualifyLead(
@@ -115,5 +145,35 @@ describe("qualifyLead", () => {
     expect(capturedContent).toContain("Acme Plumbing");
     expect(capturedContent).toContain("Has a website: yes");
     expect(capturedContent).toContain("Has a public email listed: yes");
+  });
+
+  test("includes the owner/contact name in the prompt when present, so the opener can address them by name", async () => {
+    let capturedContent = "";
+    const createCompletion = async (params: ChatCompletionCreateParamsNonStreaming) => {
+      const userMessage = params.messages.find((m) => m.role === "user");
+      capturedContent = String(userMessage?.content ?? "");
+      return completionWith(JSON.stringify({ fitScore: "possible_fit", reasoning: "ok", opener: "ok" }));
+    };
+
+    await qualifyLead(
+      fakeLead({ ownerName: "Jane Smith", ownerTitle: "Owner" }),
+      "web design services",
+      createCompletion
+    );
+
+    expect(capturedContent).toContain("Owner/contact name: Jane Smith (Owner)");
+  });
+
+  test("omits the owner/contact name line entirely when not present", async () => {
+    let capturedContent = "";
+    const createCompletion = async (params: ChatCompletionCreateParamsNonStreaming) => {
+      const userMessage = params.messages.find((m) => m.role === "user");
+      capturedContent = String(userMessage?.content ?? "");
+      return completionWith(JSON.stringify({ fitScore: "possible_fit", reasoning: "ok", opener: "ok" }));
+    };
+
+    await qualifyLead(fakeLead({ ownerName: null }), "web design services", createCompletion);
+
+    expect(capturedContent).not.toContain("Owner/contact name");
   });
 });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Phone, Mail, ExternalLink, Copy, Check, Inbox, MapPin, User, ShieldCheck, StickyNote, Target } from "lucide-react";
+import { Phone, Mail, ExternalLink, Copy, Check, Inbox, MapPin, User, ShieldCheck, StickyNote, Target, MessageSquareText } from "lucide-react";
 import { FacebookIcon, InstagramIcon, LinkedinIcon, XIcon } from "./SocialIcons";
 import { useUpdateLeadMutation } from "@/lib/apiSlice";
 import type { Lead, SocialLinks, OutreachStatus, FitScore, LeadQualification } from "@/lib/types";
@@ -22,6 +22,37 @@ function FitBadge({ qualification }: { qualification: LeadQualification }) {
       <Target className="h-2.5 w-2.5 shrink-0" aria-hidden />
       {config.label}
     </span>
+  );
+}
+
+// Only rendered for a qualified lead whose opener isn't null — poor_fit
+// leads never get one (see qualifyLeads.ts), so there's nothing to show.
+function OpenerBlock({ opener }: { opener: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      title="Click to copy"
+      onClick={async (e) => {
+        e.stopPropagation();
+        try {
+          await navigator.clipboard.writeText(opener);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1200);
+        } catch {
+          // Clipboard API can be unavailable — failing silently is fine, convenience-only.
+        }
+      }}
+      className="mt-2.5 flex w-full items-start gap-2 rounded-lg bg-teal-500/5 px-3 py-2 text-left text-[12.5px] leading-relaxed text-slate-300 ring-1 ring-teal-400/20 transition-colors hover:bg-teal-500/10"
+    >
+      <MessageSquareText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-teal-400" aria-hidden />
+      <span className="flex-1 italic">"{opener}"</span>
+      {copied ? (
+        <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" aria-hidden />
+      ) : (
+        <Copy className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-40" aria-hidden />
+      )}
+    </button>
   );
 }
 
@@ -284,6 +315,10 @@ export function LeadCards({ leads, qualifications }: Props) {
                       </a>
                     ))}
                 </div>
+
+                {qualifications?.[lead.id]?.opener && (
+                  <OpenerBlock opener={qualifications[lead.id].opener!} />
+                )}
 
                 <NotesField leadId={lead.id} value={lead.notes} />
               </div>

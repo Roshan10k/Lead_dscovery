@@ -19,6 +19,13 @@ const PLACES_PAGE_SIZE = 10;
 // At 10 results/page this caps worst-case cost at 5 credits per search.
 const MAX_PAGES = 5;
 
+// Found live: a Serper request with no timeout can hang far longer than a
+// user will wait, and with the search-strategy agent (searchAgent.ts)
+// potentially making several of these per search while planning, one slow
+// or hung call compounds into a search that looks stuck for minutes. Same
+// bound as scrape.ts's page-fetch timeout, for the same reason.
+const FETCH_TIMEOUT_MS = 10_000;
+
 /**
  * Discovery layer: turns "keyword + location" into a small list of candidate
  * businesses worth scraping. Two backends are supported:
@@ -48,29 +55,36 @@ const MAX_PAGES = 5;
  *   list (e.g. a CRM export of already-contacted companies), see
  *   excludedDomains in schema.ts. Applies to both discovery backends, since
  *   a domain can be extracted from either one's result URLs.
+ * @param maxCandidates Overrides MAX_CANDIDATES for this call. Used by
+ *   searchAgent.ts to run cheap, small "is this query any good" probes
+ *   (e.g. cap=3) while planning, distinct from the full-size discovery call
+ *   made once a query is finalized — see searchAgent.ts for the cost
+ *   reasoning.
  */
 export async function discoverCandidates(
   keyword: string,
   location: string,
   excludePlaceIds: Set<string> = new Set(),
-  excludeDomains: Set<string> = new Set()
+  excludeDomains: Set<string> = new Set(),
+  maxCandidates: number = MAX_CANDIDATES
 ): Promise<CandidateUrl[]> {
   if (process.env.SERPER_API_KEY) {
-    return discoverWithSerperPlaces(keyword, location, excludePlaceIds, excludeDomains);
+    return discoverWithSerperPlaces(keyword, location, excludePlaceIds, excludeDomains, maxCandidates);
   }
-  return discoverWithDuckDuckGo(`${keyword} in ${location}`, excludeDomains);
+  return discoverWithDuckDuckGo(`${keyword} in ${location}`, excludeDomains, maxCandidates);
 }
 
 async function discoverWithSerperPlaces(
   keyword: string,
   location: string,
   excludePlaceIds: Set<string>,
-  excludeDomains: Set<string>
+  excludeDomains: Set<string>,
+  maxCandidates: number
 ): Promise<CandidateUrl[]> {
   const results: CandidateUrl[] = [];
   let page = 1;
 
-  while (results.length < MAX_CANDIDATES && page <= MAX_PAGES) {
+  while (results.length < maxCandidates && page <= MAX_PAGES) {
     const pagePlaces = await fetchSerperPlacesPage(keyword, location, page);
     if (pagePlaces.length === 0) break; // no more results available
 
@@ -87,12 +101,34 @@ async function discoverWithSerperPlaces(
   }
 
   // Note: it's expected and correct for this to sometimes return fewer than
-  // MAX_CANDIDATES (even zero) once a keyword+location's pool of not-yet-seen
+  // maxCandidates (even zero) once a keyword+location's pool of not-yet-seen
   // businesses runs low — see the MAX_PAGES cap above.
-  return results.slice(0, MAX_CANDIDATES);
+  return results.slice(0, maxCandidates);
 }
 
+// How many times a single Serper page fetch is retried after a transient
+// failure (timeout, 5xx, network error) before giving up — found live that
+// Serper's Places API is intermittently flaky (isolated calls succeed, but
+// calls made from within a real search sometimes time out or 500), and a
+// third-party API being occasionally unreliable doesn't need to fail the
+// whole search when one short retry would likely succeed.
+const SERPER_MAX_RETRIES = 2;
+const SERPER_RETRY_DELAY_MS = 1_000;
+
 async function fetchSerperPlacesPage(keyword: string, location: string, page: number): Promise<CandidateUrl[]> {
+  let lastError: Error | undefined;
+  for (let attempt = 0; attempt <= SERPER_MAX_RETRIES; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, SERPER_RETRY_DELAY_MS));
+    try {
+      return await fetchSerperPlacesPageOnce(keyword, location, page);
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+    }
+  }
+  throw lastError;
+}
+
+async function fetchSerperPlacesPageOnce(keyword: string, location: string, page: number): Promise<CandidateUrl[]> {
   // Send location both folded into the query text AND as Places' dedicated
   // `location` field. Neither alone is reliable for the casual, free-text
   // input this app's single location box actually gets:
@@ -104,14 +140,27 @@ async function fetchSerperPlacesPage(keyword: string, location: string, page: nu
   //     region instead of erroring — worse than not using it at all.
   // Sending both disambiguates correctly in practice for casual city/country
   // names without requiring users to type a fully-qualified location.
-  const res = await fetch("https://google.serper.dev/places", {
-    method: "POST",
-    headers: {
-      "X-API-KEY": process.env.SERPER_API_KEY!,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ q: `${keyword} in ${location}`, location, num: PLACES_PAGE_SIZE, page }),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch("https://google.serper.dev/places", {
+      method: "POST",
+      headers: {
+        "X-API-KEY": process.env.SERPER_API_KEY!,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ q: `${keyword} in ${location}`, location, num: PLACES_PAGE_SIZE, page }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(`Serper Places discovery timed out after ${FETCH_TIMEOUT_MS}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!res.ok) {
     throw new Error(`Serper Places discovery failed: ${res.status} ${res.statusText}`);
@@ -145,11 +194,28 @@ async function fetchSerperPlacesPage(keyword: string, location: string, page: nu
   }));
 }
 
-async function discoverWithDuckDuckGo(query: string, excludeDomains: Set<string>): Promise<CandidateUrl[]> {
+async function discoverWithDuckDuckGo(
+  query: string,
+  excludeDomains: Set<string>,
+  maxCandidates: number
+): Promise<CandidateUrl[]> {
   const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-  const res = await fetch(url, {
-    headers: { "User-Agent": "Mozilla/5.0 (compatible; LeadDiscoveryBot/1.0)" },
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; LeadDiscoveryBot/1.0)" },
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(`DuckDuckGo discovery timed out after ${FETCH_TIMEOUT_MS}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!res.ok) {
     throw new Error(`DuckDuckGo discovery failed: ${res.status} ${res.statusText}`);
@@ -161,7 +227,7 @@ async function discoverWithDuckDuckGo(query: string, excludeDomains: Set<string>
 
   const candidates: CandidateUrl[] = [];
   $(".result__a").each((_, el) => {
-    if (candidates.length >= MAX_CANDIDATES) return;
+    if (candidates.length >= maxCandidates) return;
     const href = $(el).attr("href");
     const title = $(el).text().trim();
     const resolved = resolveDuckDuckGoRedirect(href);

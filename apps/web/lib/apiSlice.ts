@@ -8,7 +8,7 @@ export const api = createApi({
   baseQuery: fetchBaseQuery({ baseUrl: API_BASE_URL }),
   tagTypes: ["Search", "Exclusions"],
   endpoints: (builder) => ({
-    createSearch: builder.mutation<{ searchId: string }, { keyword: string; location: string }>({
+    createSearch: builder.mutation<{ searchId: string }, { keyword: string; location: string } | { goal: string }>({
       query: (body) => ({ url: "/api/search", method: "POST", body }),
     }),
     getSearchStatus: builder.query<SearchRecord, string>({

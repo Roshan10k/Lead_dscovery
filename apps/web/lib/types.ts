@@ -1,15 +1,30 @@
 export type SearchStatus =
   | "pending"
+  | "planning"
   | "discovering"
   | "scraping"
   | "extracting"
   | "completed"
   | "failed";
 
+// One attempt the search-strategy agent made while turning a free-text goal
+// into a keyword+location query — see the API's searchAgent.ts.
+export interface SearchStep {
+  keyword: string;
+  location: string;
+  candidateCount: number;
+  verdict: string;
+}
+
 export interface SearchRecord {
   id: string;
   keyword: string;
   location: string;
+  // The original natural-language input, when this search came from the
+  // "describe your goal" mode rather than an exact keyword+location — null
+  // otherwise. keyword/location above are always the resolved query either way.
+  goal: string | null;
+  searchSteps: SearchStep[] | null;
   status: SearchStatus;
   candidateCount: number;
   processedCount: number;

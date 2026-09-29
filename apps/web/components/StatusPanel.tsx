@@ -1,7 +1,10 @@
-import { Check, Globe, FileSearch, Sparkles, AlertTriangle, Loader2 } from "lucide-react";
+import { Check, Globe, FileSearch, Sparkles, AlertTriangle, Loader2, Wand2 } from "lucide-react";
 import type { SearchRecord, SearchStatus } from "@/lib/types";
 
+// "Plan" only ever appears for a goal-based search (see StatusPanel below) —
+// included in STEP_ORDER regardless so the index math stays correct either way.
 const STEPS: { status: SearchStatus; label: string; icon: typeof Globe }[] = [
+  { status: "planning", label: "Plan", icon: Wand2 },
   { status: "discovering", label: "Discover", icon: Globe },
   { status: "scraping", label: "Scrape", icon: FileSearch },
   { status: "extracting", label: "Extract", icon: Sparkles },
@@ -10,10 +13,11 @@ const STEPS: { status: SearchStatus; label: string; icon: typeof Globe }[] = [
 
 const STEP_ORDER: Record<SearchStatus, number> = {
   pending: -1,
-  discovering: 0,
-  scraping: 1,
-  extracting: 2,
-  completed: 3,
+  planning: 0,
+  discovering: 1,
+  scraping: 2,
+  extracting: 3,
+  completed: 4,
   failed: -1,
 };
 
@@ -30,20 +34,29 @@ export function StatusPanel({ status }: { status: SearchRecord }) {
     );
   }
 
+  // A direct keyword+location search never has a "planning" phase — skip
+  // that step entirely rather than showing a step that will never activate.
+  const steps = status.goal ? STEPS : STEPS.filter((s) => s.status !== "planning");
+
   const currentIndex = STEP_ORDER[status.status];
   const progressPct =
     status.candidateCount > 0
       ? Math.min(100, Math.round((status.processedCount / status.candidateCount) * 100))
       : currentIndex >= 0
-        ? ((currentIndex + 1) / STEPS.length) * 100
+        ? ((currentIndex + 1) / steps.length) * 100
         : 0;
 
   return (
     <div className="mt-6 rounded-2xl bg-slate-900/70 p-5 shadow-card ring-1 ring-white/10 backdrop-blur-xl">
       <div className="flex items-center justify-between gap-4">
-        {STEPS.map((step, i) => {
-          const isDone = currentIndex > i || status.status === "completed";
-          const isActive = currentIndex === i && status.status !== "completed";
+        {steps.map((step, i) => {
+          // Compared against each step's own STEP_ORDER value, not the loop
+          // index `i` — those diverge once "planning" is filtered out for a
+          // direct search, since e.g. "discovering" is then steps[0] but
+          // still STEP_ORDER value 1.
+          const stepOrder = STEP_ORDER[step.status];
+          const isDone = currentIndex > stepOrder || status.status === "completed";
+          const isActive = currentIndex === stepOrder && status.status !== "completed";
           const Icon = step.icon;
           return (
             <div key={step.status} className="flex flex-1 items-center">
@@ -74,7 +87,7 @@ export function StatusPanel({ status }: { status: SearchRecord }) {
                   {step.label}
                 </span>
               </div>
-              {i < STEPS.length - 1 && (
+              {i < steps.length - 1 && (
                 <div
                   className={`mx-1 mt-[-18px] h-0.5 flex-1 rounded transition-colors ${
                     isDone ? "bg-cyan-500/50" : "bg-slate-800"
@@ -96,6 +109,28 @@ export function StatusPanel({ status }: { status: SearchRecord }) {
         <p className="mt-2 text-center font-mono text-[11px] text-slate-500">
           Processed {status.processedCount} / {status.candidateCount} candidate pages
         </p>
+      )}
+
+      {!!status.searchSteps?.length && (
+        <div className="mt-4 border-t border-white/5 pt-4">
+          <p className="font-mono text-[10px] uppercase tracking-wider text-slate-500">
+            How the search was planned
+          </p>
+          <ul className="mt-2 space-y-1.5">
+            {status.searchSteps.map((step, i) => {
+              const isFinal = i === status.searchSteps!.length - 1;
+              return (
+                <li key={i} className="flex items-start gap-2 text-xs">
+                  <span className={`mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full ${isFinal ? "bg-teal-400" : "bg-slate-700"}`} />
+                  <span className="text-slate-400">
+                    <span className="text-slate-200">"{step.keyword}"</span> in{" "}
+                    <span className="text-slate-200">{step.location}</span> — {step.verdict}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       )}
     </div>
   );

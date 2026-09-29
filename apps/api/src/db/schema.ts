@@ -1,12 +1,20 @@
 import { pgTable, text, timestamp, uuid, integer, doublePrecision, jsonb } from "drizzle-orm/pg-core";
-import type { SocialLinks } from "../types";
+import type { SocialLinks, SearchStep } from "../types";
 
 export const searches = pgTable("searches", {
   id: uuid("id").primaryKey().defaultRandom(),
   keyword: text("keyword").notNull(),
   location: text("location").notNull(),
+  // The original natural-language input, when the search came from the
+  // agent-planned path (see POST /api/search and searchAgent.ts) rather than
+  // an exact keyword+location. Null for a direct search — `keyword`/
+  // `location` above are always the resolved, final query either way, so
+  // every downstream consumer (dedup, grouping, export) is unaffected by
+  // which path created the search.
+  goal: text("goal"),
+  searchSteps: jsonb("search_steps").$type<SearchStep[]>(),
   status: text("status", {
-    enum: ["pending", "discovering", "scraping", "extracting", "completed", "failed"],
+    enum: ["pending", "planning", "discovering", "scraping", "extracting", "completed", "failed"],
   })
     .notNull()
     .default("pending"),

@@ -47,3 +47,16 @@ export interface SocialLinks {
   linkedin?: string;
   twitter?: string;
 }
+
+/**
+ * One attempt the search-strategy agent made while turning a free-text goal
+ * into a keyword+location query — see searchAgent.ts. Stored on the search
+ * row (schema.ts) so the UI can show the agent's reasoning trail instead of
+ * a black box ("tried X, too few results, tried Y instead").
+ */
+export interface SearchStep {
+  keyword: string;
+  location: string;
+  candidateCount: number;
+  verdict: string;
+}

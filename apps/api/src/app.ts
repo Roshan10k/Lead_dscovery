@@ -3,7 +3,7 @@ import { cors } from "@elysiajs/cors";
 import { eq, and, desc, sql, getTableColumns } from "drizzle-orm";
 import { db } from "./db/client";
 import { searches, leads, excludedDomains } from "./db/schema";
-import { runSearchPipeline } from "./services/pipeline";
+import { runSearchPipeline, runAgentSearchPipeline } from "./services/pipeline";
 import { leadsToCsv } from "./lib/csv";
 import { extractDomain } from "./lib/domain";
 
@@ -50,9 +50,30 @@ export const app = new Elysia()
 
   // Create a search job. Kicks off the pipeline in the background and
   // returns immediately with the searchId so the frontend can poll status.
+  // Accepts either an exact { keyword, location } or a free-text { goal } —
+  // the latter runs the search-strategy agent (searchAgent.ts) first to
+  // resolve it into a keyword+location before the rest of the pipeline
+  // (discovery/scrape/extract) runs, which is identical either way.
   .post(
     "/api/search",
     async ({ body, set }) => {
+      if ("goal" in body) {
+        const goal = body.goal.trim();
+        if (!goal) {
+          set.status = 400;
+          return { error: "goal is required" };
+        }
+
+        // keyword/location are resolved asynchronously by the agent — these
+        // placeholders are overwritten before any lead is ever inserted, so
+        // no consumer of the row (dedup, grouping, export) ever sees them.
+        const [search] = await db.insert(searches).values({ keyword: goal, location: "", goal }).returning();
+
+        runAgentSearchPipeline(search.id, goal);
+
+        return { searchId: search.id };
+      }
+
       const keyword = body.keyword.trim();
       const location = body.location.trim();
 
@@ -73,10 +94,15 @@ export const app = new Elysia()
       return { searchId: search.id };
     },
     {
-      body: t.Object({
-        keyword: t.String(),
-        location: t.String(),
-      }),
+      body: t.Union([
+        t.Object({
+          keyword: t.String(),
+          location: t.String(),
+        }),
+        t.Object({
+          goal: t.String(),
+        }),
+      ]),
     }
   )
 

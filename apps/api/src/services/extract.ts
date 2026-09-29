@@ -15,6 +15,10 @@ export const leadSchema = z.object({
   ownerTitle: z.string().nullable(),
 });
 
+// The OpenAI SDK's default timeout (10 minutes) is far longer than any user
+// will wait — bounds one call's worst case rather than leaving it unbounded.
+const GROQ_TIMEOUT_MS = 30_000;
+
 let client: OpenAI | null = null;
 function getClient(): OpenAI {
   if (!client) {
@@ -24,6 +28,7 @@ function getClient(): OpenAI {
     client = new OpenAI({
       apiKey: process.env.GROQ_API_KEY,
       baseURL: process.env.GROQ_BASE_URL ?? "https://api.groq.com/openai/v1",
+      timeout: GROQ_TIMEOUT_MS,
     });
   }
   return client;

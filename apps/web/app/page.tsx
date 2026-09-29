@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { AlertTriangle, Radar } from "lucide-react";
-import { SearchForm } from "@/components/SearchForm";
+import { SearchForm, type SearchMode } from "@/components/SearchForm";
 import { LeadCards } from "@/components/LeadCards";
 import { StatusPanel } from "@/components/StatusPanel";
 import { StatsBar } from "@/components/StatsBar";
@@ -18,7 +18,7 @@ import {
 import { useLeadFilters } from "@/lib/useLeadFilters";
 import { extractErrorMessage } from "@/lib/apiError";
 
-const IN_PROGRESS_STATUSES = new Set(["pending", "discovering", "scraping", "extracting"]);
+const IN_PROGRESS_STATUSES = new Set(["pending", "planning", "discovering", "scraping", "extracting"]);
 
 const EXAMPLES = [
   { keyword: "Cleaning Business", location: "Australia" },
@@ -31,8 +31,10 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4
 export default function Home() {
   const [view, setView] = useState<"search" | "all-leads">("search");
   const [selectedGroup, setSelectedGroup] = useState<{ keyword: string; location: string } | null>(null);
+  const [searchMode, setSearchMode] = useState<SearchMode>("exact");
   const [keyword, setKeyword] = useState("");
   const [location, setLocation] = useState("");
+  const [goal, setGoal] = useState("");
   const [searchId, setSearchId] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -86,6 +88,17 @@ export default function Home() {
     setSearchId(null);
     try {
       const res = await createSearch({ keyword: nextKeyword, location: nextLocation }).unwrap();
+      setSearchId(res.searchId);
+    } catch (err) {
+      setCreateError(extractErrorMessage(err));
+    }
+  }
+
+  async function handleSearchGoal(nextGoal: string) {
+    setCreateError(null);
+    setSearchId(null);
+    try {
+      const res = await createSearch({ goal: nextGoal }).unwrap();
       setSearchId(res.searchId);
     } catch (err) {
       setCreateError(extractErrorMessage(err));
@@ -169,28 +182,35 @@ export default function Home() {
 
               <div className="mt-9">
                 <SearchForm
+                  mode={searchMode}
+                  onModeChange={setSearchMode}
                   keyword={keyword}
                   location={location}
                   onKeywordChange={setKeyword}
                   onLocationChange={setLocation}
                   onSearch={handleSearch}
+                  goal={goal}
+                  onGoalChange={setGoal}
+                  onSearchGoal={handleSearchGoal}
                   isLoading={isCreating || isInProgress}
                 />
-                <div className="mt-4 flex flex-wrap items-center gap-2">
-                  <span className="font-mono text-[10px] uppercase tracking-wider text-slate-600">Try:</span>
-                  {EXAMPLES.map((ex) => (
-                    <button
-                      key={ex.keyword}
-                      type="button"
-                      onClick={() => runExample(ex)}
-                      disabled={isCreating || isInProgress}
-                      className="inline-flex items-center gap-1.5 rounded-full bg-slate-900/70 px-3 py-1 text-xs text-slate-400 ring-1 ring-white/10 transition hover:text-slate-200 hover:ring-teal-400/40 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <span className="h-1.5 w-1.5 rounded-full bg-slate-600" />
-                      {ex.keyword} · {ex.location}
-                    </button>
-                  ))}
-                </div>
+                {searchMode === "exact" && (
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-[10px] uppercase tracking-wider text-slate-600">Try:</span>
+                    {EXAMPLES.map((ex) => (
+                      <button
+                        key={ex.keyword}
+                        type="button"
+                        onClick={() => runExample(ex)}
+                        disabled={isCreating || isInProgress}
+                        className="inline-flex items-center gap-1.5 rounded-full bg-slate-900/70 px-3 py-1 text-xs text-slate-400 ring-1 ring-white/10 transition hover:text-slate-200 hover:ring-teal-400/40 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <span className="h-1.5 w-1.5 rounded-full bg-slate-600" />
+                        {ex.keyword} · {ex.location}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -214,6 +234,9 @@ export default function Home() {
                   <h2 className="text-sm font-medium text-slate-500">
                     Results for <span className="text-slate-200">"{resultsData.search.keyword}"</span> in{" "}
                     <span className="text-slate-200">{resultsData.search.location}</span>
+                    {resultsData.search.goal && (
+                      <span className="ml-1.5 text-slate-600">(from: "{resultsData.search.goal}")</span>
+                    )}
                     {isInProgress && (
                       <span className="ml-2 inline-flex items-center gap-1.5 font-mono text-[11px] text-teal-400">
                         <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-teal-400" />

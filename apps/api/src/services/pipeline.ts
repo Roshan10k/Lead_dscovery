@@ -5,6 +5,7 @@ import { discoverCandidates } from "./discovery";
 import { scrapePage } from "./scrape";
 import { extractLead } from "./extract";
 import { findContactDetails, type ContactPayload } from "./contactFinder";
+import { planSearch } from "./searchAgent";
 import { normalizeDedupeKey } from "../lib/dedupe";
 import { getCached, setCached } from "../lib/cache";
 import type { ExtractedLead, SocialLinks } from "../types";
@@ -18,6 +19,60 @@ const CONCURRENCY = 3;
 type CachedContactPayload = ContactPayload;
 type CachedFullPayload = ExtractedLead & { socialLinks: SocialLinks };
 
+// Businesses already surfaced by ANY past search — not scoped to this exact
+// keyword+location — so a repeat search for "Cleaning Business in Australia"
+// (or a differently-worded search that happens to surface the same
+// businesses) returns genuinely new leads instead of the same companies
+// again. See discovery.ts's MAX_PAGES for the cost bound this is weighed
+// against, and schema.ts's leads.placeId for why this is permanent rather
+// than scoped/expiring. Shared by both the direct and agent-planned entry
+// points below, since a search-strategy probe should skip already-seen
+// businesses too — otherwise the agent could judge a query "good" based on
+// candidates the pipeline would immediately filter back out anyway.
+async function computeExclusionSets(): Promise<{ excludePlaceIds: Set<string>; excludeDomains: Set<string> }> {
+  const seenPlaceIdRows = await db.select({ placeId: leads.placeId }).from(leads).where(isNotNull(leads.placeId));
+  const excludePlaceIds = new Set(seenPlaceIdRows.map((r) => r.placeId!));
+
+  // Domains imported from an external "already contacted" list (see
+  // POST /api/exclusions/import) — extends the exclusion above to
+  // businesses this app hasn't found itself yet, but the user already knows
+  // about from outside it.
+  const excludedDomainRows = await db.select({ domain: excludedDomains.domain }).from(excludedDomains);
+  const excludeDomains = new Set(excludedDomainRows.map((r) => r.domain));
+
+  return { excludePlaceIds, excludeDomains };
+}
+
+/**
+ * Plans a search from a free-text goal (see searchAgent.ts), writes the
+ * resolved keyword/location/goal/steps onto the search row, then hands off
+ * to the same runSearchPipeline used by a direct keyword+location search —
+ * everything from discovery onward is identical either way.
+ */
+export async function runAgentSearchPipeline(searchId: string, goal: string) {
+  try {
+    await setStatus(searchId, "planning");
+    const { excludePlaceIds, excludeDomains } = await computeExclusionSets();
+    const planned = await planSearch(goal, excludePlaceIds, excludeDomains);
+
+    await db
+      .update(searches)
+      .set({ keyword: planned.keyword, location: planned.location, searchSteps: planned.steps })
+      .where(eq(searches.id, searchId));
+
+    await runSearchPipeline(searchId, planned.keyword, planned.location);
+  } catch (err) {
+    await db
+      .update(searches)
+      .set({
+        status: "failed",
+        errorMessage: err instanceof Error ? err.message : "Unknown error",
+        completedAt: new Date(),
+      })
+      .where(eq(searches.id, searchId));
+  }
+}
+
 /**
  * Runs the full discovery -> scrape -> extract -> store pipeline for one
  * search, updating its status as it goes. Runs in the background (fire and
@@ -28,25 +83,7 @@ export async function runSearchPipeline(searchId: string, keyword: string, locat
   try {
     await setStatus(searchId, "discovering");
 
-    // Businesses already surfaced by ANY past search — not scoped to this
-    // exact keyword+location — so a repeat search for "Cleaning Business in
-    // Australia" (or a differently-worded search that happens to surface
-    // the same businesses) returns genuinely new leads instead of the same
-    // companies again. See discovery.ts's MAX_PAGES for the cost bound this
-    // is weighed against, and schema.ts's leads.placeId for why this is
-    // permanent rather than scoped/expiring.
-    const seenPlaceIdRows = await db
-      .select({ placeId: leads.placeId })
-      .from(leads)
-      .where(isNotNull(leads.placeId));
-    const excludePlaceIds = new Set(seenPlaceIdRows.map((r) => r.placeId!));
-
-    // Domains imported from an external "already contacted" list (see
-    // POST /api/exclusions/import) — extends the exclusion above to
-    // businesses this app hasn't found itself yet, but the user already
-    // knows about from outside it.
-    const excludedDomainRows = await db.select({ domain: excludedDomains.domain }).from(excludedDomains);
-    const excludeDomains = new Set(excludedDomainRows.map((r) => r.domain));
+    const { excludePlaceIds, excludeDomains } = await computeExclusionSets();
 
     const candidates = await discoverCandidates(keyword, location, excludePlaceIds, excludeDomains);
 

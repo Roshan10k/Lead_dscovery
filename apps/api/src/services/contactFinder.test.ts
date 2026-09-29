@@ -3,8 +3,8 @@ import { findContactDetails } from "./contactFinder";
 import type { ScrapedPage } from "./scrape";
 import type { ExtractedContactDetails } from "../types";
 
-function page(url: string, socialLinks: ScrapedPage["socialLinks"] = {}, mailtoEmail: string | null = null): ScrapedPage {
-  return { url, title: "Title", text: "text", socialLinks, mailtoEmail };
+function page(url: string, socialLinks: ScrapedPage["socialLinks"] = {}, pageEmail: string | null = null): ScrapedPage {
+  return { url, title: "Title", text: "text", socialLinks, pageEmail };
 }
 
 describe("findContactDetails", () => {

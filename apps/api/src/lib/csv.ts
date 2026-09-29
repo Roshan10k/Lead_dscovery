@@ -14,6 +14,7 @@ const CSV_COLUMNS = [
   "location",
   "phone",
   "email",
+  "emailVerified",
   "website",
   "facebook",
   "instagram",
@@ -36,6 +37,11 @@ function leadToCsvRow(lead: Lead): Record<(typeof CSV_COLUMNS)[number], string> 
     location: lead.location ?? "",
     phone: lead.phone ?? "",
     email: lead.email ?? "",
+    // "" (not e.g. "unknown") when null — matches every other absent-field
+    // column's convention in this CSV, and null covers both "no email" and
+    // "DNS lookup was inconclusive" (see verifyEmail.ts), neither of which
+    // should be conflated with a confirmed "no" (false).
+    emailVerified: lead.emailVerified === null ? "" : String(lead.emailVerified),
     website: lead.website ?? "",
     facebook: lead.socialLinks?.facebook ?? "",
     instagram: lead.socialLinks?.instagram ?? "",

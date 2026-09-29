@@ -1,5 +1,6 @@
 import type { CheerioAPI } from "cheerio";
 import type { SocialLinks } from "../types";
+import { isPlausibleEmail } from "../lib/email";
 
 const FETCH_TIMEOUT_MS = 10_000;
 const MAX_TEXT_LENGTH = 6000; // keep LLM prompts small/cheap
@@ -9,9 +10,12 @@ export interface ScrapedPage {
   title: string;
   text: string;
   socialLinks: SocialLinks;
-  // An email found via a `mailto:` link's href, independent of the LLM
-  // extraction step — see extractMailtoEmail for why this exists.
-  mailtoEmail: string | null;
+  // An email found directly in the page's HTML markup — a `mailto:` link's
+  // href, or a Cloudflare-obfuscated address decoded back out — independent
+  // of the LLM's text-based reading. See extractPageEmail for why this
+  // exists: both cases involve markup an LLM given only visible text can
+  // never see the real value of.
+  pageEmail: string | null;
 }
 
 // Matches a business's own social media page links, not e.g. Facebook's own
@@ -67,14 +71,13 @@ function extractSocialLinks($: CheerioAPI): SocialLinks {
  * text-only LLM extraction below can never see no matter how good the
  * prompt is. Same rationale and same "read hrefs before stripping" approach
  * as extractSocialLinks above.
+ *
+ * Rejects anything that isn't a plausible "x@y.z" once the query-string/
+ * whitespace stripping below has run — found live against a real site whose
+ * mailto href had a malformed query string (a literal space instead of
+ * "?subject=..."), which without this check leaked straight into the
+ * "email" field as "info@example.com subject=complaints".
  */
-// Loose but sufficient: reject anything that isn't a plausible "x@y.z" once
-// the query-string/whitespace stripping below has run — found live against a
-// real site whose mailto href had a malformed query string (a literal space
-// instead of "?subject=..."), which without this check leaked straight into
-// the "email" field as "info@example.com subject=complaints".
-const PLAUSIBLE_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 function extractMailtoEmail($: CheerioAPI): string | null {
   let found: string | null = null;
   $("a[href^='mailto:']").each((_, el) => {
@@ -89,9 +92,46 @@ function extractMailtoEmail($: CheerioAPI): string | null {
       // malformed percent-encoding — fall through and use it as-is
     }
     const email = raw.split(/[?\s]/)[0].trim();
-    if (PLAUSIBLE_EMAIL.test(email)) found = email;
+    if (isPlausibleEmail(email)) found = email;
   });
   return found;
+}
+
+/**
+ * Decodes Cloudflare's email-obfuscation encoding: a site using it renders
+ * "[email protected]" as the visible text (which is exactly what an LLM
+ * reading page text would — and, found live, did — mistake for a real
+ * address) while the actual email is XOR-encoded in a `data-cfemail`
+ * attribute. The encoding is Cloudflare's own public, undocumented-but-
+ * well-known scheme: first byte is the XOR key, every following byte pair
+ * is one ciphertext byte to XOR-decode with it.
+ */
+function decodeCloudflareEmail(encodedHex: string): string | null {
+  const bytes = encodedHex.match(/../g)?.map((byte) => parseInt(byte, 16));
+  if (!bytes || bytes.length < 2 || bytes.some(Number.isNaN)) return null;
+
+  const key = bytes[0];
+  const decoded = bytes
+    .slice(1)
+    .map((byte) => String.fromCharCode(byte ^ key))
+    .join("");
+  return isPlausibleEmail(decoded) ? decoded : null;
+}
+
+function extractCloudflareEmail($: CheerioAPI): string | null {
+  let found: string | null = null;
+  $("[data-cfemail]").each((_, el) => {
+    if (found) return;
+    const encoded = $(el).attr("data-cfemail");
+    if (!encoded) return;
+    found = decodeCloudflareEmail(encoded);
+  });
+  return found;
+}
+
+/** Tries every deterministic (non-LLM) source of an email on the page, in order. */
+function extractPageEmail($: CheerioAPI): string | null {
+  return extractMailtoEmail($) ?? extractCloudflareEmail($);
 }
 
 /**
@@ -120,7 +160,7 @@ export async function scrapePage(url: string): Promise<ScrapedPage | null> {
     const $ = cheerio.load(html);
 
     const socialLinks = extractSocialLinks($);
-    const mailtoEmail = extractMailtoEmail($);
+    const pageEmail = extractPageEmail($);
 
     $("script, style, noscript, svg, nav, footer").remove();
 
@@ -128,7 +168,7 @@ export async function scrapePage(url: string): Promise<ScrapedPage | null> {
     const text = $("body").text().replace(/\s+/g, " ").trim().slice(0, MAX_TEXT_LENGTH);
 
     if (!text) return null;
-    return { url, title, text, socialLinks, mailtoEmail };
+    return { url, title, text, socialLinks, pageEmail };
   } catch {
     // Failed/timed-out page — the pipeline treats this as a skip, not a fatal error.
     return null;

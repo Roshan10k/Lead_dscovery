@@ -1,5 +1,23 @@
 import { describe, expect, test } from "bun:test";
-import { leadSchema, contactDetailsSchema } from "./extract";
+import { leadSchema, contactDetailsSchema, extractLead, extractContactDetails } from "./extract";
+import type { ChatCompletion, ChatCompletionCreateParamsNonStreaming } from "openai/resources/chat/completions";
+import type { ScrapedPage } from "./scrape";
+
+function fakePage(overrides: Partial<ScrapedPage> = {}): ScrapedPage {
+  return { url: "https://clean-co.example", title: "Clean Co", text: "some page text", socialLinks: {}, pageEmail: null, ...overrides };
+}
+
+function completionWith(content: string): ChatCompletion {
+  return {
+    id: "fake",
+    object: "chat.completion",
+    created: 0,
+    model: "fake",
+    choices: [
+      { index: 0, finish_reason: "stop", logprobs: null, message: { role: "assistant", content, refusal: null } },
+    ],
+  } as unknown as ChatCompletion;
+}
 
 describe("leadSchema (full extraction, DuckDuckGo path)", () => {
   test("accepts a well-formed business listing", () => {
@@ -98,5 +116,48 @@ describe("contactDetailsSchema (Places path — email/description/owner only)", 
   test("rejects a non-JSON-shaped / garbage payload", () => {
     const result = contactDetailsSchema.safeParse("not an object");
     expect(result.success).toBe(false);
+  });
+});
+
+// Found live: the LLM once returned "[email protected]" — Cloudflare's
+// obfuscation placeholder text — as if it were a real extracted email.
+// Schema validation alone can't catch this (it's a syntactically fine
+// string), so both extraction functions filter the email field through
+// isPlausibleEmail after parsing. These exercise that filter directly via
+// an injected fake completion, without a real LLM call.
+describe("extractContactDetails filters implausible emails from the LLM", () => {
+  test("passes through a well-formed email unchanged", async () => {
+    const createCompletion = async (_p: ChatCompletionCreateParamsNonStreaming) =>
+      completionWith(JSON.stringify({ email: "info@clean-co.example", description: null, ownerName: null, ownerTitle: null }));
+    const result = await extractContactDetails(fakePage(), createCompletion);
+    expect(result?.email).toBe("info@clean-co.example");
+  });
+
+  test("nulls out Cloudflare's obfuscation placeholder text", async () => {
+    const createCompletion = async () =>
+      completionWith(JSON.stringify({ email: "[email protected]", description: null, ownerName: null, ownerTitle: null }));
+    const result = await extractContactDetails(fakePage(), createCompletion);
+    expect(result?.email).toBeNull();
+  });
+});
+
+describe("extractLead filters implausible emails from the LLM", () => {
+  test("nulls out Cloudflare's obfuscation placeholder text", async () => {
+    const createCompletion = async () =>
+      completionWith(
+        JSON.stringify({
+          isBusinessListing: true,
+          businessName: "Clean Co",
+          location: null,
+          phone: null,
+          email: "[email protected]",
+          website: null,
+          description: null,
+          ownerName: null,
+          ownerTitle: null,
+        })
+      );
+    const result = await extractLead(fakePage(), createCompletion);
+    expect(result?.email).toBeNull();
   });
 });

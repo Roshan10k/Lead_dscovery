@@ -1,7 +1,11 @@
 import OpenAI from "openai";
 import { z } from "zod";
+import type { ChatCompletion, ChatCompletionCreateParamsNonStreaming } from "openai/resources/chat/completions";
 import type { ScrapedPage } from "./scrape";
 import type { ExtractedLead, ExtractedContactDetails } from "../types";
+import { isPlausibleEmail } from "../lib/email";
+
+type CreateCompletion = (params: ChatCompletionCreateParamsNonStreaming) => Promise<ChatCompletion>;
 
 export const leadSchema = z.object({
   isBusinessListing: z.boolean(),
@@ -56,9 +60,12 @@ a news article, or unrelated content), set isBusinessListing to false and use nu
  * the page wasn't a usable business listing, the LLM call failed, or the
  * response didn't match the expected schema.
  */
-export async function extractLead(page: ScrapedPage): Promise<ExtractedLead | null> {
+export async function extractLead(
+  page: ScrapedPage,
+  createCompletion: CreateCompletion = (params) => getClient().chat.completions.create(params)
+): Promise<ExtractedLead | null> {
   try {
-    const completion = await getClient().chat.completions.create({
+    const completion = await createCompletion({
       model: process.env.GROQ_MODEL ?? "openai/gpt-oss-20b",
       temperature: 0,
       response_format: { type: "json_object" },
@@ -80,7 +87,12 @@ export async function extractLead(page: ScrapedPage): Promise<ExtractedLead | nu
     }
 
     const { isBusinessListing: _drop, businessName, ...rest } = parsed.data;
-    return { businessName, ...rest };
+    // Found live: the LLM once returned "[email protected]" — Cloudflare's
+    // obfuscation placeholder text, not a real address — as if it were data
+    // it actually read. Schema validation only checks shape (string |
+    // null), not plausibility, so this filters it back to null rather than
+    // storing garbage as a real contact email.
+    return { businessName, ...rest, email: isPlausibleEmail(rest.email) ? rest.email : null };
   } catch {
     // Bad/invalid LLM output for a single page should never take down the whole search.
     return null;
@@ -110,9 +122,12 @@ Return ONLY the JSON object, no prose, no markdown fences. If a field is not pre
  * Maps data doesn't include: email, description, and — where the site names
  * one — the owner/contact person and their title.
  */
-export async function extractContactDetails(page: ScrapedPage): Promise<ExtractedContactDetails | null> {
+export async function extractContactDetails(
+  page: ScrapedPage,
+  createCompletion: CreateCompletion = (params) => getClient().chat.completions.create(params)
+): Promise<ExtractedContactDetails | null> {
   try {
-    const completion = await getClient().chat.completions.create({
+    const completion = await createCompletion({
       model: process.env.GROQ_MODEL ?? "openai/gpt-oss-20b",
       temperature: 0,
       response_format: { type: "json_object" },
@@ -130,7 +145,8 @@ export async function extractContactDetails(page: ScrapedPage): Promise<Extracte
 
     const parsed = contactDetailsSchema.safeParse(JSON.parse(raw));
     if (!parsed.success) return null;
-    return parsed.data;
+    // See extractLead's identical filter above for why.
+    return { ...parsed.data, email: isPlausibleEmail(parsed.data.email) ? parsed.data.email : null };
   } catch {
     return null;
   }

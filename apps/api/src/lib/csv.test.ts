@@ -10,6 +10,7 @@ function fakeLead(overrides: Partial<Lead> = {}): Lead {
     location: "Sydney NSW",
     phone: "+61 2 9189 4164",
     email: "info@clean-co.com.au",
+    emailVerified: true,
     website: "https://commercial-cleaning.com.au",
     description: "Commercial cleaning in Sydney.",
     ownerName: null,
@@ -52,7 +53,7 @@ describe("leadsToCsv", () => {
   test("header includes owner, social, and geo columns", () => {
     const csv = leadsToCsv([]);
     expect(csv).toBe(
-      "businessName,ownerName,ownerTitle,location,phone,email,website,facebook,instagram,linkedin,twitter,description,outreachStatus,notes,latitude,longitude,sourceUrl"
+      "businessName,ownerName,ownerTitle,location,phone,email,emailVerified,website,facebook,instagram,linkedin,twitter,description,outreachStatus,notes,latitude,longitude,sourceUrl"
     );
   });
 
@@ -87,5 +88,16 @@ describe("leadsToCsv", () => {
     const csv = leadsToCsv([fakeLead({ location: "1 Main St, Sydney NSW" })]);
     const [, row] = csv.split("\n");
     expect(row).toContain('"1 Main St, Sydney NSW"');
+  });
+
+  test("emailVerified renders as true/false, and null (inconclusive/no email) as empty rather than 'null'", () => {
+    const verifiedCsv = leadsToCsv([fakeLead({ emailVerified: true })]);
+    expect(verifiedCsv.split("\n")[1]).toContain("true");
+
+    const unverifiedCsv = leadsToCsv([fakeLead({ emailVerified: false })]);
+    expect(unverifiedCsv.split("\n")[1]).toContain("false");
+
+    const unknownCsv = leadsToCsv([fakeLead({ emailVerified: null })]);
+    expect(unknownCsv).not.toContain("null");
   });
 });

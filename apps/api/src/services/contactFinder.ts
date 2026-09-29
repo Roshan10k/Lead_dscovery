@@ -37,9 +37,10 @@ export async function findContactDetails(
   if (!homepage) return null; // site unreachable entirely — nothing to fall back to
 
   const homepageResult = await extract(homepage);
-  // mailtoEmail catches icon-only "envelope button" emails the text-only LLM
-  // extraction never sees — see extractMailtoEmail in scrape.ts.
-  const homepageEmail = homepageResult?.email ?? homepage.mailtoEmail;
+  // pageEmail catches emails the text-only LLM extraction never sees at all —
+  // an icon-only "envelope button" mailto link, or a Cloudflare-obfuscated
+  // address — see extractPageEmail in scrape.ts.
+  const homepageEmail = homepageResult?.email ?? homepage.pageEmail;
   let mergedSocialLinks = homepage.socialLinks;
 
   if (homepageEmail) {
@@ -62,7 +63,7 @@ export async function findContactDetails(
 
     mergedSocialLinks = { ...mergedSocialLinks, ...fallbackPage.socialLinks };
     const fallbackResult = await extract(fallbackPage);
-    const fallbackEmail = fallbackResult?.email ?? fallbackPage.mailtoEmail;
+    const fallbackEmail = fallbackResult?.email ?? fallbackPage.pageEmail;
     if (fallbackEmail) {
       return {
         contactDetails: {

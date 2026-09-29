@@ -6,6 +6,7 @@ import { scrapePage } from "./scrape";
 import { extractLead } from "./extract";
 import { findContactDetails, type ContactPayload } from "./contactFinder";
 import { planSearch } from "./searchAgent";
+import { verifyEmailDomain } from "./verifyEmail";
 import { normalizeDedupeKey } from "../lib/dedupe";
 import { getCached, setCached } from "../lib/cache";
 import type { ExtractedLead, SocialLinks } from "../types";
@@ -177,10 +178,10 @@ export async function runSearchPipeline(searchId: string, keyword: string, locat
             if (page) {
               await db.update(searches).set({ status: "extracting" }).where(eq(searches.id, searchId));
               const result = await extractLead(page);
-              // See contactFinder.ts's mailtoEmail handling — same fix, same
-              // reason: an icon-only mailto link has no visible text for the
-              // LLM to read.
-              extracted = result ? { ...result, email: result.email ?? page.mailtoEmail, socialLinks: page.socialLinks } : null;
+              // See contactFinder.ts's pageEmail handling — same fix, same
+              // reason: an icon-only mailto link or a Cloudflare-obfuscated
+              // address has no plain visible text for the LLM to read.
+              extracted = result ? { ...result, email: result.email ?? page.pageEmail, socialLinks: page.socialLinks } : null;
             } else {
               extracted = null;
             }
@@ -199,12 +200,18 @@ export async function runSearchPipeline(searchId: string, keyword: string, locat
         if (seenBusinessNames.has(dedupeKey)) continue;
         seenBusinessNames.add(dedupeKey);
 
+        // DNS-only domain check (see verifyEmail.ts) — cheap enough to run
+        // inline for every lead with an email, unlike qualifyLeads.ts's
+        // per-offering LLM judgment which needs a separate on-demand job.
+        const emailVerified = lead.email ? await verifyEmailDomain(lead.email) : null;
+
         await db.insert(leads).values({
           searchId,
           businessName: lead.businessName,
           location: lead.location,
           phone: lead.phone,
           email: lead.email,
+          emailVerified,
           website: lead.website,
           description: lead.description,
           ownerName: lead.ownerName,

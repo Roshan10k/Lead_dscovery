@@ -56,6 +56,10 @@ export interface Lead {
   location: string | null;
   phone: string | null;
   email: string | null;
+  // Whether the email's domain can actually receive mail (DNS MX/A record
+  // check) — null means no email, or the check was inconclusive. Not a real
+  // SMTP mailbox check; see the API's verifyEmail.ts for why.
+  emailVerified: boolean | null;
   website: string | null;
   description: string | null;
   ownerName: string | null;

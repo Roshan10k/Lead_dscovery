@@ -127,12 +127,32 @@ function domainOf(url: string): string {
   }
 }
 
-function CopyableField({ icon: Icon, value, tone }: { icon: typeof Phone; value: string; tone: string }) {
+// verified: true = domain confirmed able to receive mail (DNS check, not a
+// real mailbox check — see the API's verifyEmail.ts); false = domain
+// confirmed dead/nonexistent; undefined = not applicable (e.g. phone
+// numbers) or no verification was ever run for this field.
+function CopyableField({
+  icon: Icon,
+  value,
+  tone,
+  verified,
+}: {
+  icon: typeof Phone;
+  value: string;
+  tone: string;
+  verified?: boolean | null;
+}) {
   const [copied, setCopied] = useState(false);
   return (
     <button
       type="button"
-      title="Click to copy"
+      title={
+        verified === true
+          ? "Click to copy — domain verified"
+          : verified === false
+            ? "Click to copy — domain does not appear to accept mail"
+            : "Click to copy"
+      }
       onClick={async (e) => {
         e.stopPropagation();
         try {
@@ -148,6 +168,8 @@ function CopyableField({ icon: Icon, value, tone }: { icon: typeof Phone; value:
     >
       <Icon className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
       <span className="max-w-[220px] truncate">{value}</span>
+      {verified === true && <ShieldCheck className="h-3 w-3 shrink-0 text-emerald-400" aria-hidden />}
+      {verified === false && <ShieldCheck className="h-3 w-3 shrink-0 text-red-400/70" aria-hidden />}
       {copied ? (
         <Check className="h-3 w-3 shrink-0 text-emerald-400" aria-hidden />
       ) : (
@@ -235,7 +257,9 @@ export function LeadCards({ leads, qualifications }: Props) {
                 {/* Contact row */}
                 <div className="mt-2.5 flex flex-wrap items-center gap-1.5 -ml-2">
                   {lead.phone && <CopyableField icon={Phone} value={lead.phone} tone="text-slate-300" />}
-                  {lead.email && <CopyableField icon={Mail} value={lead.email} tone="text-cyan-300" />}
+                  {lead.email && (
+                    <CopyableField icon={Mail} value={lead.email} tone="text-cyan-300" verified={lead.emailVerified} />
+                  )}
                   <span className="inline-flex items-center gap-1 rounded-lg bg-slate-800/70 px-2 py-1 text-[11px] text-slate-500">
                     <ShieldCheck className="h-3 w-3 shrink-0" aria-hidden />
                     Source: {domainOf(lead.sourceUrl)}

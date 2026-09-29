@@ -63,6 +63,31 @@ beforeAll(() => {
           { headers: { "content-type": "text/html" } }
         );
       }
+      if (url.pathname === "/cloudflare-email") {
+        // "2a594b464f596a4f524b475a464f04494547" XOR-decodes (key 0x2a) to
+        // "sales@example.com" — the same encoding real Cloudflare-protected
+        // sites use. Placed inside <footer> deliberately: that's where it
+        // was found live on a real site, and it must still be caught even
+        // though footer content gets stripped before the LLM ever sees it.
+        return new Response(
+          `<html><head><title>Clean Co</title></head><body>
+            Welcome to Clean Co.
+            <footer>
+              <a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="2a594b464f596a4f524b475a464f04494547">[email&#160;protected]</a>
+            </footer>
+          </body></html>`,
+          { headers: { "content-type": "text/html" } }
+        );
+      }
+      if (url.pathname === "/cloudflare-email-malformed") {
+        return new Response(
+          `<html><head><title>Clean Co</title></head><body>
+            Welcome to Clean Co.
+            <a class="__cf_email__" data-cfemail="not-valid-hex">[email protected]</a>
+          </body></html>`,
+          { headers: { "content-type": "text/html" } }
+        );
+      }
       if (url.pathname === "/not-found") {
         return new Response("nope", { status: 404 });
       }
@@ -132,16 +157,30 @@ describe("scrapePage mailto email extraction", () => {
     const page = await scrapePage(`${server.url}mailto-icon-only`);
     expect(page).not.toBeNull();
     expect(page!.text).not.toContain("@"); // no visible email text — icon-only button
-    expect(page?.mailtoEmail).toBe("hello@clean-co.example");
+    expect(page?.pageEmail).toBe("hello@clean-co.example");
   });
 
-  test("returns null when a page has no mailto: link", async () => {
+  test("returns null when a page has no mailto: link or Cloudflare-obfuscated email", async () => {
     const page = await scrapePage(`${server.url}no-social`);
-    expect(page?.mailtoEmail).toBeNull();
+    expect(page?.pageEmail).toBeNull();
   });
 
   test("strips a malformed query string (space instead of '?') rather than leaking it into the email — found live against a real site", async () => {
     const page = await scrapePage(`${server.url}mailto-malformed`);
-    expect(page?.mailtoEmail).toBe("contact@clean-co.example");
+    expect(page?.pageEmail).toBe("contact@clean-co.example");
+  });
+});
+
+describe("scrapePage Cloudflare email-obfuscation decoding", () => {
+  test("decodes a Cloudflare-obfuscated email even inside a <footer>, which gets stripped before the LLM sees any text", async () => {
+    const page = await scrapePage(`${server.url}cloudflare-email`);
+    expect(page).not.toBeNull();
+    expect(page!.text).not.toContain("@"); // only the "[email protected]" placeholder is visible text
+    expect(page?.pageEmail).toBe("sales@example.com");
+  });
+
+  test("returns null for malformed data-cfemail hex rather than throwing", async () => {
+    const page = await scrapePage(`${server.url}cloudflare-email-malformed`);
+    expect(page?.pageEmail).toBeNull();
   });
 });

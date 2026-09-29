@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, integer, doublePrecision, jsonb, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, uuid, integer, doublePrecision, jsonb, uniqueIndex, boolean } from "drizzle-orm/pg-core";
 import type { SocialLinks, SearchStep } from "../types";
 
 export const searches = pgTable("searches", {
@@ -34,6 +34,13 @@ export const leads = pgTable("leads", {
   location: text("location"),
   phone: text("phone"),
   email: text("email"),
+  // Whether the email's domain can actually receive mail (an MX or fallback
+  // A record exists) — DNS-only, not a real SMTP mailbox check (port 25 is
+  // blocked on most networks this app runs on, confirmed live rather than
+  // assumed — see verifyEmail.ts). Null when there's no email to check, or
+  // the DNS lookup itself was inconclusive (never set to false just because
+  // a lookup timed out — see verifyEmail.ts's null-vs-false distinction).
+  emailVerified: boolean("email_verified"),
   website: text("website"),
   description: text("description"),
   ownerName: text("owner_name"),

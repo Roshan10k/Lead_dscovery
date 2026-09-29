@@ -10,6 +10,7 @@ import { LeadsMap } from "@/components/LeadsMap";
 import { LeadFilterBar } from "@/components/LeadFilterBar";
 import { LeadGroupsList } from "@/components/LeadGroupsList";
 import { LeadGroupDetail } from "@/components/LeadGroupDetail";
+import { QualifyPanel } from "@/components/QualifyPanel";
 import {
   useCreateSearchMutation,
   useGetSearchStatusQuery,
@@ -17,6 +18,7 @@ import {
 } from "@/lib/apiSlice";
 import { useLeadFilters } from "@/lib/useLeadFilters";
 import { extractErrorMessage } from "@/lib/apiError";
+import type { LeadQualification } from "@/lib/types";
 
 const IN_PROGRESS_STATUSES = new Set(["pending", "planning", "discovering", "scraping", "extracting"]);
 
@@ -37,6 +39,7 @@ export default function Home() {
   const [goal, setGoal] = useState("");
   const [searchId, setSearchId] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [qualifications, setQualifications] = useState<Record<string, LeadQualification>>({});
 
   const [createSearch, { isLoading: isCreating }] = useCreateSearchMutation();
 
@@ -86,6 +89,7 @@ export default function Home() {
   async function handleSearch(nextKeyword: string, nextLocation: string) {
     setCreateError(null);
     setSearchId(null);
+    setQualifications({}); // a new search's leads are unrelated to the last search's fit judgments
     try {
       const res = await createSearch({ keyword: nextKeyword, location: nextLocation }).unwrap();
       setSearchId(res.searchId);
@@ -97,6 +101,7 @@ export default function Home() {
   async function handleSearchGoal(nextGoal: string) {
     setCreateError(null);
     setSearchId(null);
+    setQualifications({});
     try {
       const res = await createSearch({ goal: nextGoal }).unwrap();
       setSearchId(res.searchId);
@@ -254,9 +259,13 @@ export default function Home() {
                     exportUrl={`${API_BASE_URL}/api/search/${searchId}/export`}
                   />
                 </div>
+                <QualifyPanel
+                  leadIds={visibleLeads.map((l) => l.id)}
+                  onResults={(results) => setQualifications((prev) => ({ ...prev, ...results }))}
+                />
                 <StatsBar leads={visibleLeads} />
                 <LeadsMap leads={visibleLeads} />
-                <LeadCards leads={visibleLeads} />
+                <LeadCards leads={visibleLeads} qualifications={qualifications} />
               </div>
             )}
           </div>

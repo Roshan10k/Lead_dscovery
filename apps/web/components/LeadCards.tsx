@@ -99,7 +99,7 @@ function NotesField({ leadId, value }: { leadId: string; value: string | null })
           setDraft(value ?? "");
           setEditing(true);
         }}
-        className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] text-slate-500 transition-colors hover:bg-slate-800 hover:text-slate-300"
+        className="mt-2 inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] text-slate-500 transition-colors hover:bg-slate-800 hover:text-slate-300"
       >
         <StickyNote className="h-3 w-3 shrink-0" aria-hidden />
         {value ? <span className="max-w-[200px] truncate">{value}</span> : "Add note"}
@@ -256,15 +256,6 @@ export function LeadCards({ leads, qualifications }: Props) {
                   <h3 className="truncate text-[15px] font-semibold text-slate-100" title={lead.businessName}>
                     {lead.businessName}
                   </h3>
-                  {lead.placeId && (
-                    <span
-                      title="Business identity confirmed via Google Places, not just an LLM's guess at a scraped page"
-                      className="inline-flex shrink-0 cursor-help items-center gap-1 rounded-full bg-cyan-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-cyan-300"
-                    >
-                      <span className="h-1.5 w-1.5 rounded-full bg-cyan-400" />
-                      Verified
-                    </span>
-                  )}
                   <StatusSelect leadId={lead.id} value={lead.outreachStatus} />
                   {qualifications?.[lead.id] && <FitBadge qualification={qualifications[lead.id]} />}
                 </div>
@@ -300,6 +291,15 @@ export function LeadCards({ leads, qualifications }: Props) {
                     <ShieldCheck className="h-3 w-3 shrink-0" aria-hidden />
                     Source: {domainOf(lead.sourceUrl)}
                   </span>
+                  {lead.placeId && (
+                    <span
+                      title="Business identity confirmed via Google Places, not just an LLM's guess at a scraped page"
+                      className="inline-flex shrink-0 cursor-help items-center gap-1 rounded-lg bg-cyan-500/10 px-2 py-1 text-[11px] font-medium text-cyan-300"
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full bg-cyan-400" />
+                      Verified
+                    </span>
+                  )}
                   {lead.socialLinks &&
                     SOCIAL_ICON_MAP.filter(({ key }) => lead.socialLinks?.[key]).map(({ key, Icon, hover }) => (
                       <a

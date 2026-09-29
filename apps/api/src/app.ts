@@ -1,9 +1,10 @@
 import { Elysia, t } from "elysia";
 import { cors } from "@elysiajs/cors";
-import { eq, and, desc, sql, getTableColumns } from "drizzle-orm";
+import { eq, and, inArray, desc, sql, getTableColumns } from "drizzle-orm";
 import { db } from "./db/client";
-import { searches, leads, excludedDomains } from "./db/schema";
+import { searches, leads, excludedDomains, qualificationJobs, leadQualifications } from "./db/schema";
 import { runSearchPipeline, runAgentSearchPipeline } from "./services/pipeline";
+import { runQualificationJob, normalizeOffering } from "./services/qualifyLeads";
 import { leadsToCsv } from "./lib/csv";
 import { extractDomain } from "./lib/domain";
 
@@ -163,6 +164,68 @@ export const app = new Elysia()
       }),
     }
   )
+
+  // Kicks off a batch "qualify these leads against this offering" job —
+  // one LLM call per lead, too slow to do inline, so it runs in the
+  // background and the frontend polls it the same way it polls a search.
+  .post(
+    "/api/leads/qualify",
+    async ({ body, set }) => {
+      const offering = body.offering.trim();
+      const leadIds = [...new Set(body.leadIds)];
+
+      if (!offering) {
+        set.status = 400;
+        return { error: "offering is required" };
+      }
+      if (leadIds.length === 0) {
+        set.status = 400;
+        return { error: "at least one leadId is required" };
+      }
+
+      const [job] = await db
+        .insert(qualificationJobs)
+        .values({ offering, leadIds, totalCount: leadIds.length })
+        .returning();
+
+      runQualificationJob(job.id, offering, leadIds);
+
+      return { jobId: job.id };
+    },
+    {
+      body: t.Object({
+        offering: t.String(),
+        leadIds: t.Array(t.String()),
+      }),
+    }
+  )
+
+  // Poll a qualification job's status/progress.
+  .get("/api/leads/qualify/:jobId", async ({ params, set }) => {
+    const [job] = await db.select().from(qualificationJobs).where(eq(qualificationJobs.id, params.jobId));
+    if (!job) {
+      set.status = 404;
+      return { error: "qualification job not found" };
+    }
+    return job;
+  })
+
+  // Fetch the qualification results for a job's leads — separate from the
+  // job status above so a caller not yet interested in per-lead results
+  // (e.g. just showing a progress bar) doesn't need to fetch them.
+  .get("/api/leads/qualify/:jobId/results", async ({ params, set }) => {
+    const [job] = await db.select().from(qualificationJobs).where(eq(qualificationJobs.id, params.jobId));
+    if (!job) {
+      set.status = 404;
+      return { error: "qualification job not found" };
+    }
+    const offeringKey = normalizeOffering(job.offering);
+    const results = await db
+      .select()
+      .from(leadQualifications)
+      .where(and(inArray(leadQualifications.leadId, job.leadIds), eq(leadQualifications.offeringKey, offeringKey)));
+    return { qualifications: results };
+  })
 
   // Optional CSV export.
   .get("/api/search/:id/export", async ({ params, set }) => {

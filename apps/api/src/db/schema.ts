@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, integer, doublePrecision, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, uuid, integer, doublePrecision, jsonb, uniqueIndex } from "drizzle-orm/pg-core";
 import type { SocialLinks, SearchStep } from "../types";
 
 export const searches = pgTable("searches", {
@@ -89,6 +89,53 @@ export const excludedDomains = pgTable("excluded_domains", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Tracks a batch "qualify these leads against this offering" run, so the
+// frontend can poll it the same way it polls a search — qualifying a
+// batch of leads means one LLM call per lead, too slow to do inline in a
+// single request. See qualifyLeads.ts.
+export const qualificationJobs = pgTable("qualification_jobs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  offering: text("offering").notNull(),
+  leadIds: jsonb("lead_ids").$type<string[]>().notNull(),
+  status: text("status", { enum: ["pending", "processing", "completed", "failed"] })
+    .notNull()
+    .default("pending"),
+  processedCount: integer("processed_count").notNull().default(0),
+  totalCount: integer("total_count").notNull().default(0),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+});
+
+// One lead's fit judgment for one offering — kept separate from `leads`
+// itself (rather than a column on it) because the same lead can legitimately
+// be qualified differently against different offerings over time (a lead
+// that's a poor fit for "web design" might be a great fit for "SEO
+// services"), and a user should be able to re-qualify an existing pool of
+// leads for a new pitch without losing past judgments or re-scraping
+// anything. Unique on (leadId, offeringKey) so re-running qualification with
+// the same offering text is a cache hit, not a duplicate LLM call — same
+// "don't pay twice for the same answer" reasoning as pageCache.
+export const leadQualifications = pgTable(
+  "lead_qualifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    leadId: uuid("lead_id")
+      .notNull()
+      .references(() => leads.id, { onDelete: "cascade" }),
+    // Normalized (trim + lowercase) offering text, used only as the cache
+    // key — `offering` below keeps the original for display.
+    offeringKey: text("offering_key").notNull(),
+    offering: text("offering").notNull(),
+    fitScore: text("fit_score", { enum: ["strong_fit", "possible_fit", "poor_fit"] }).notNull(),
+    reasoning: text("reasoning").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    leadOffering: uniqueIndex("lead_qualifications_lead_offering_idx").on(table.leadId, table.offeringKey),
+  })
+);
+
 export type Search = typeof searches.$inferSelect;
 export type NewSearch = typeof searches.$inferInsert;
 export type Lead = typeof leads.$inferSelect;
@@ -96,3 +143,5 @@ export type NewLead = typeof leads.$inferInsert;
 export type PageCache = typeof pageCache.$inferSelect;
 export type NewPageCache = typeof pageCache.$inferInsert;
 export type ExcludedDomain = typeof excludedDomains.$inferSelect;
+export type QualificationJob = typeof qualificationJobs.$inferSelect;
+export type LeadQualification = typeof leadQualifications.$inferSelect;

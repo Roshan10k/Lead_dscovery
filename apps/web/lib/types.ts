@@ -68,3 +68,29 @@ export interface Lead {
   sourceUrl: string;
   createdAt: string;
 }
+
+export type FitScore = "strong_fit" | "possible_fit" | "poor_fit";
+
+export type QualificationJobStatus = "pending" | "processing" | "completed" | "failed";
+
+export interface QualificationJob {
+  id: string;
+  offering: string;
+  leadIds: string[];
+  status: QualificationJobStatus;
+  processedCount: number;
+  totalCount: number;
+  errorMessage: string | null;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+export interface LeadQualification {
+  id: string;
+  leadId: string;
+  offeringKey: string;
+  offering: string;
+  fitScore: FitScore;
+  reasoning: string;
+  createdAt: string;
+}

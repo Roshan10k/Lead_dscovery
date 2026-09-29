@@ -1,12 +1,12 @@
 import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
-import type { SearchRecord, Lead, LeadGroup, OutreachStatus } from "./types";
+import type { SearchRecord, Lead, LeadGroup, OutreachStatus, QualificationJob, LeadQualification } from "./types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 
 export const api = createApi({
   reducerPath: "api",
   baseQuery: fetchBaseQuery({ baseUrl: API_BASE_URL }),
-  tagTypes: ["Search", "Exclusions"],
+  tagTypes: ["Search", "Exclusions", "Qualification"],
   endpoints: (builder) => ({
     createSearch: builder.mutation<{ searchId: string }, { keyword: string; location: string } | { goal: string }>({
       query: (body) => ({ url: "/api/search", method: "POST", body }),
@@ -73,6 +73,20 @@ export const api = createApi({
       query: () => ({ url: "/api/exclusions", method: "DELETE" }),
       invalidatesTags: ["Exclusions"],
     }),
+    // Kicks off a batch lead-qualification job (see qualifyLeads.ts) — one
+    // LLM call per lead judging its fit against a free-text offering, too
+    // slow to do inline, so this returns a jobId to poll like a search.
+    qualifyLeads: builder.mutation<{ jobId: string }, { offering: string; leadIds: string[] }>({
+      query: (body) => ({ url: "/api/leads/qualify", method: "POST", body }),
+    }),
+    getQualificationJob: builder.query<QualificationJob, string>({
+      query: (jobId) => `/api/leads/qualify/${jobId}`,
+      providesTags: (_result, _err, jobId) => [{ type: "Qualification", id: jobId }],
+    }),
+    getQualificationResults: builder.query<{ qualifications: LeadQualification[] }, string>({
+      query: (jobId) => `/api/leads/qualify/${jobId}/results`,
+      providesTags: (_result, _err, jobId) => [{ type: "Qualification", id: jobId }],
+    }),
   }),
 });
 
@@ -87,4 +101,7 @@ export const {
   useImportExclusionsMutation,
   useDeleteExclusionMutation,
   useClearExclusionsMutation,
+  useQualifyLeadsMutation,
+  useGetQualificationJobQuery,
+  useGetQualificationResultsQuery,
 } = api;

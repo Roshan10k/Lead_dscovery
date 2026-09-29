@@ -1,10 +1,29 @@
 "use client";
 
 import { useState } from "react";
-import { Phone, Mail, ExternalLink, Copy, Check, Inbox, MapPin, User, ShieldCheck, StickyNote } from "lucide-react";
+import { Phone, Mail, ExternalLink, Copy, Check, Inbox, MapPin, User, ShieldCheck, StickyNote, Target } from "lucide-react";
 import { FacebookIcon, InstagramIcon, LinkedinIcon, XIcon } from "./SocialIcons";
 import { useUpdateLeadMutation } from "@/lib/apiSlice";
-import type { Lead, SocialLinks, OutreachStatus } from "@/lib/types";
+import type { Lead, SocialLinks, OutreachStatus, FitScore, LeadQualification } from "@/lib/types";
+
+const FIT_CONFIG: Record<FitScore, { label: string; className: string }> = {
+  strong_fit: { label: "Strong fit", className: "bg-emerald-500/15 text-emerald-300" },
+  possible_fit: { label: "Possible fit", className: "bg-amber-500/15 text-amber-300" },
+  poor_fit: { label: "Poor fit", className: "bg-slate-800 text-slate-500" },
+};
+
+function FitBadge({ qualification }: { qualification: LeadQualification }) {
+  const config = FIT_CONFIG[qualification.fitScore];
+  return (
+    <span
+      title={qualification.reasoning}
+      className={`inline-flex shrink-0 cursor-help items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${config.className}`}
+    >
+      <Target className="h-2.5 w-2.5 shrink-0" aria-hidden />
+      {config.label}
+    </span>
+  );
+}
 
 const STATUS_CONFIG: Record<OutreachStatus, { label: string; className: string }> = {
   new: { label: "New", className: "bg-slate-800 text-slate-400" },
@@ -138,7 +157,14 @@ function CopyableField({ icon: Icon, value, tone }: { icon: typeof Phone; value:
   );
 }
 
-export function LeadCards({ leads }: { leads: Lead[] }) {
+interface Props {
+  leads: Lead[];
+  // Keyed by lead id, present only once QualifyPanel's job has completed —
+  // omitted entirely (not just empty) in views that don't offer qualification.
+  qualifications?: Record<string, LeadQualification>;
+}
+
+export function LeadCards({ leads, qualifications }: Props) {
   if (leads.length === 0) {
     return (
       <div className="flex flex-col items-center gap-3 rounded-2xl bg-slate-900/50 py-16 text-center ring-1 ring-dashed ring-white/10">
@@ -182,6 +208,7 @@ export function LeadCards({ leads }: { leads: Lead[] }) {
                     Verified
                   </span>
                   <StatusSelect leadId={lead.id} value={lead.outreachStatus} />
+                  {qualifications?.[lead.id] && <FitBadge qualification={qualifications[lead.id]} />}
                 </div>
 
                 {lead.ownerName && (

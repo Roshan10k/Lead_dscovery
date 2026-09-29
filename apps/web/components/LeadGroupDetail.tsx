@@ -8,6 +8,8 @@ import { StatsBar } from "./StatsBar";
 import { LeadsMap } from "./LeadsMap";
 import { LeadCards } from "./LeadCards";
 import { LeadFilterBar } from "./LeadFilterBar";
+import { QualifyPanel } from "./QualifyPanel";
+import type { LeadQualification } from "@/lib/types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 const PAGE_SIZE = 50;
@@ -25,6 +27,7 @@ export function LeadGroupDetail({ keyword, location, onBack }: Props) {
   // unusable to scroll through. Same "load more" pattern as before grouping
   // existed, just scoped to one group's leads instead of the entire dataset.
   const [limit, setLimit] = useState(PAGE_SIZE);
+  const [qualifications, setQualifications] = useState<Record<string, LeadQualification>>({});
 
   // refetchOnMountOrArgChange: without it, re-entering a group would just
   // keep showing whatever was last fetched for it in this session, stale
@@ -77,9 +80,13 @@ export function LeadGroupDetail({ keyword, location, onBack }: Props) {
               exportUrl={exportUrl}
             />
           </div>
+          <QualifyPanel
+            leadIds={visibleLeads.map((l) => l.id)}
+            onResults={(results) => setQualifications((prev) => ({ ...prev, ...results }))}
+          />
           <StatsBar leads={visibleLeads} />
           <LeadsMap leads={visibleLeads} />
-          <LeadCards leads={visibleLeads} />
+          <LeadCards leads={visibleLeads} qualifications={qualifications} />
           {hasMore && (
             <div className="flex justify-center pb-4">
               <button

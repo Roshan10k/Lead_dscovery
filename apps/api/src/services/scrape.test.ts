@@ -45,6 +45,24 @@ beforeAll(() => {
           { headers: { "content-type": "text/html" } }
         );
       }
+      if (url.pathname === "/mailto-icon-only") {
+        return new Response(
+          `<html><head><title>Clean Co</title></head><body>
+            Welcome to Clean Co.
+            <a href="mailto:hello@clean-co.example?subject=Hi"><svg>envelope icon</svg></a>
+          </body></html>`,
+          { headers: { "content-type": "text/html" } }
+        );
+      }
+      if (url.pathname === "/mailto-malformed") {
+        return new Response(
+          `<html><head><title>Clean Co</title></head><body>
+            Welcome to Clean Co.
+            <a href="mailto:contact@clean-co.example subject=complaints">Email us</a>
+          </body></html>`,
+          { headers: { "content-type": "text/html" } }
+        );
+      }
       if (url.pathname === "/not-found") {
         return new Response("nope", { status: 404 });
       }
@@ -106,5 +124,24 @@ describe("scrapePage social link extraction", () => {
   test("returns an empty object when a page has no social links, not undefined/null", async () => {
     const page = await scrapePage(`${server.url}no-social`);
     expect(page?.socialLinks).toEqual({});
+  });
+});
+
+describe("scrapePage mailto email extraction", () => {
+  test("extracts an email from an icon-only mailto: link with no visible email text", async () => {
+    const page = await scrapePage(`${server.url}mailto-icon-only`);
+    expect(page).not.toBeNull();
+    expect(page!.text).not.toContain("@"); // no visible email text — icon-only button
+    expect(page?.mailtoEmail).toBe("hello@clean-co.example");
+  });
+
+  test("returns null when a page has no mailto: link", async () => {
+    const page = await scrapePage(`${server.url}no-social`);
+    expect(page?.mailtoEmail).toBeNull();
+  });
+
+  test("strips a malformed query string (space instead of '?') rather than leaking it into the email — found live against a real site", async () => {
+    const page = await scrapePage(`${server.url}mailto-malformed`);
+    expect(page?.mailtoEmail).toBe("contact@clean-co.example");
   });
 });

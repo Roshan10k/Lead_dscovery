@@ -9,6 +9,9 @@ export interface ScrapedPage {
   title: string;
   text: string;
   socialLinks: SocialLinks;
+  // An email found via a `mailto:` link's href, independent of the LLM
+  // extraction step — see extractMailtoEmail for why this exists.
+  mailtoEmail: string | null;
 }
 
 // Matches a business's own social media page links, not e.g. Facebook's own
@@ -58,6 +61,40 @@ function extractSocialLinks($: CheerioAPI): SocialLinks {
 }
 
 /**
+ * Pulls an email address straight out of a `mailto:` link's href — found
+ * live during testing: some sites put their email only on an icon-only
+ * "envelope" button (no visible text at all, just the href), which the
+ * text-only LLM extraction below can never see no matter how good the
+ * prompt is. Same rationale and same "read hrefs before stripping" approach
+ * as extractSocialLinks above.
+ */
+// Loose but sufficient: reject anything that isn't a plausible "x@y.z" once
+// the query-string/whitespace stripping below has run — found live against a
+// real site whose mailto href had a malformed query string (a literal space
+// instead of "?subject=..."), which without this check leaked straight into
+// the "email" field as "info@example.com subject=complaints".
+const PLAUSIBLE_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function extractMailtoEmail($: CheerioAPI): string | null {
+  let found: string | null = null;
+  $("a[href^='mailto:']").each((_, el) => {
+    if (found) return;
+    const href = $(el).attr("href");
+    if (!href) return;
+
+    let raw = href.slice("mailto:".length);
+    try {
+      raw = decodeURIComponent(raw);
+    } catch {
+      // malformed percent-encoding — fall through and use it as-is
+    }
+    const email = raw.split(/[?\s]/)[0].trim();
+    if (PLAUSIBLE_EMAIL.test(email)) found = email;
+  });
+  return found;
+}
+
+/**
  * Fetches a public page and reduces it to visible text. Deliberately simple —
  * no headless browser, no JS rendering — which is enough for most business
  * listing / directory / "about us" pages within a 1-week MVP budget.
@@ -83,6 +120,7 @@ export async function scrapePage(url: string): Promise<ScrapedPage | null> {
     const $ = cheerio.load(html);
 
     const socialLinks = extractSocialLinks($);
+    const mailtoEmail = extractMailtoEmail($);
 
     $("script, style, noscript, svg, nav, footer").remove();
 
@@ -90,7 +128,7 @@ export async function scrapePage(url: string): Promise<ScrapedPage | null> {
     const text = $("body").text().replace(/\s+/g, " ").trim().slice(0, MAX_TEXT_LENGTH);
 
     if (!text) return null;
-    return { url, title, text, socialLinks };
+    return { url, title, text, socialLinks, mailtoEmail };
   } catch {
     // Failed/timed-out page — the pipeline treats this as a skip, not a fatal error.
     return null;

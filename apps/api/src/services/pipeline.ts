@@ -3,10 +3,11 @@ import { db } from "../db/client";
 import { searches, leads, excludedDomains } from "../db/schema";
 import { discoverCandidates } from "./discovery";
 import { scrapePage } from "./scrape";
-import { extractLead, extractContactDetails } from "./extract";
+import { extractLead } from "./extract";
+import { findContactDetails, type ContactPayload } from "./contactFinder";
 import { normalizeDedupeKey } from "../lib/dedupe";
 import { getCached, setCached } from "../lib/cache";
-import type { ExtractedLead, ExtractedContactDetails, SocialLinks } from "../types";
+import type { ExtractedLead, SocialLinks } from "../types";
 
 const CONCURRENCY = 3;
 
@@ -14,15 +15,8 @@ const CONCURRENCY = 3;
 // scrape-derived social links, bundled together. Caching them separately
 // would mean a cache hit on one still had to re-scrape for the other,
 // defeating the point of caching at all.
-type CachedContactPayload = ExtractedContactDetails & { socialLinks: SocialLinks };
+type CachedContactPayload = ContactPayload;
 type CachedFullPayload = ExtractedLead & { socialLinks: SocialLinks };
-
-const EMPTY_CONTACT_DETAILS: ExtractedContactDetails = {
-  email: null,
-  description: null,
-  ownerName: null,
-  ownerTitle: null,
-};
 
 /**
  * Runs the full discovery -> scrape -> extract -> store pipeline for one
@@ -113,13 +107,11 @@ export async function runSearchPipeline(searchId: string, keyword: string, locat
               contactDetails = cached.payload;
             } else {
               await db.update(searches).set({ status: "extracting" }).where(eq(searches.id, searchId));
-              const page = await scrapePage(candidate.knownWebsite);
-              // Social links are parsed straight from the HTML (scrape.ts),
-              // independent of the LLM — so they're kept even if the LLM
-              // extraction step below fails or returns nothing, rather than
-              // being discarded along with it.
-              const extracted = page ? await extractContactDetails(page) : null;
-              contactDetails = page ? { ...(extracted ?? EMPTY_CONTACT_DETAILS), socialLinks: page.socialLinks } : null;
+              // Most business sites don't put their email on the homepage —
+              // this also tries /contact, /contact-us, /about before giving
+              // up. See contactFinder.ts.
+              const result = await findContactDetails(candidate.knownWebsite);
+              contactDetails = result?.contactDetails ?? null;
               await setCached(candidate.knownWebsite, "contact_details", contactDetails);
             }
           }
@@ -148,7 +140,10 @@ export async function runSearchPipeline(searchId: string, keyword: string, locat
             if (page) {
               await db.update(searches).set({ status: "extracting" }).where(eq(searches.id, searchId));
               const result = await extractLead(page);
-              extracted = result ? { ...result, socialLinks: page.socialLinks } : null;
+              // See contactFinder.ts's mailtoEmail handling — same fix, same
+              // reason: an icon-only mailto link has no visible text for the
+              // LLM to read.
+              extracted = result ? { ...result, email: result.email ?? page.mailtoEmail, socialLinks: page.socialLinks } : null;
             } else {
               extracted = null;
             }

@@ -225,10 +225,15 @@ export function LeadCards({ leads, qualifications }: Props) {
                   <h3 className="truncate text-[15px] font-semibold text-slate-100" title={lead.businessName}>
                     {lead.businessName}
                   </h3>
-                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-cyan-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-cyan-300">
-                    <span className="h-1.5 w-1.5 rounded-full bg-cyan-400" />
-                    Verified
-                  </span>
+                  {lead.placeId && (
+                    <span
+                      title="Business identity confirmed via Google Places, not just an LLM's guess at a scraped page"
+                      className="inline-flex shrink-0 cursor-help items-center gap-1 rounded-full bg-cyan-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-cyan-300"
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full bg-cyan-400" />
+                      Verified
+                    </span>
+                  )}
                   <StatusSelect leadId={lead.id} value={lead.outreachStatus} />
                   {qualifications?.[lead.id] && <FitBadge qualification={qualifications[lead.id]} />}
                 </div>

@@ -67,6 +67,12 @@ export interface Lead {
   socialLinks: SocialLinks | null;
   latitude: number | null;
   longitude: number | null;
+  // Google's stable per-business Place ID — set only when this lead's
+  // identity came from Serper's Places API (trusted structured business
+  // data), null when it came from the DuckDuckGo fallback path (an LLM's
+  // best guess at whether a scraped page is even a real business). Used to
+  // show an honest "Verified" badge — see LeadCards.tsx.
+  placeId: string | null;
   outreachStatus: OutreachStatus;
   notes: string | null;
   sourceUrl: string;

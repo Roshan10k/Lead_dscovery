@@ -1,6 +1,23 @@
+import { extractDomain } from "../lib/domain";
 import type { CandidateUrl } from "../types";
 
-const MAX_CANDIDATES = 8;
+// How many candidate businesses to gather per search. Configurable via env
+// rather than hardcoded, since the right number depends on how the app is
+// being used — a fast live demo wants fewer (shorter wait, fewer LLM calls),
+// real lead-generation work wants more. Empirically, Serper's Places API
+// caps out at 10 results per request regardless of a higher `num` — getting
+// past that requires pagination (see PLACES_PAGE_SIZE below), which costs
+// one additional Serper request per extra page of 10.
+const MAX_CANDIDATES = Number(process.env.DISCOVERY_MAX_CANDIDATES ?? 8);
+const PLACES_PAGE_SIZE = 10;
+
+// Safety cap on how many Serper pages a single search will fetch while
+// hunting for candidates not already excluded (see excludePlaceIds below).
+// Without this, a keyword+location whose business pool is nearly exhausted
+// (most results already seen in past searches) could paginate indefinitely
+// chasing a handful of new results, burning Serper credits with no bound.
+// At 10 results/page this caps worst-case cost at 5 credits per search.
+const MAX_PAGES = 5;
 
 /**
  * Discovery layer: turns "keyword + location" into a small list of candidate
@@ -21,14 +38,61 @@ const MAX_CANDIDATES = 8;
  * Swap this file out for the ScrapeGraphAI "searchScraper" endpoint if you'd
  * rather use their managed discovery+scrape pipeline instead.
  */
-export async function discoverCandidates(keyword: string, location: string): Promise<CandidateUrl[]> {
+/**
+ * @param excludePlaceIds Business Place IDs to skip — used to permanently
+ *   avoid resurfacing a business already returned by a past search (see
+ *   leads.placeId in schema.ts and pipeline.ts for how this set is built).
+ *   Only meaningful for the Serper Places path; the DuckDuckGo fallback has
+ *   no stable per-business ID to dedupe against.
+ * @param excludeDomains Business domains to skip — imported from an external
+ *   list (e.g. a CRM export of already-contacted companies), see
+ *   excludedDomains in schema.ts. Applies to both discovery backends, since
+ *   a domain can be extracted from either one's result URLs.
+ */
+export async function discoverCandidates(
+  keyword: string,
+  location: string,
+  excludePlaceIds: Set<string> = new Set(),
+  excludeDomains: Set<string> = new Set()
+): Promise<CandidateUrl[]> {
   if (process.env.SERPER_API_KEY) {
-    return discoverWithSerperPlaces(keyword, location);
+    return discoverWithSerperPlaces(keyword, location, excludePlaceIds, excludeDomains);
   }
-  return discoverWithDuckDuckGo(`${keyword} in ${location}`);
+  return discoverWithDuckDuckGo(`${keyword} in ${location}`, excludeDomains);
 }
 
-async function discoverWithSerperPlaces(keyword: string, location: string): Promise<CandidateUrl[]> {
+async function discoverWithSerperPlaces(
+  keyword: string,
+  location: string,
+  excludePlaceIds: Set<string>,
+  excludeDomains: Set<string>
+): Promise<CandidateUrl[]> {
+  const results: CandidateUrl[] = [];
+  let page = 1;
+
+  while (results.length < MAX_CANDIDATES && page <= MAX_PAGES) {
+    const pagePlaces = await fetchSerperPlacesPage(keyword, location, page);
+    if (pagePlaces.length === 0) break; // no more results available
+
+    const fresh = pagePlaces.filter((p) => {
+      if (p.knownPlaceId && excludePlaceIds.has(p.knownPlaceId)) return false;
+      const domain = p.knownWebsite ? extractDomain(p.knownWebsite) : null;
+      if (domain && excludeDomains.has(domain)) return false;
+      return true;
+    });
+    results.push(...fresh);
+
+    if (pagePlaces.length < PLACES_PAGE_SIZE) break; // that was the last page
+    page++;
+  }
+
+  // Note: it's expected and correct for this to sometimes return fewer than
+  // MAX_CANDIDATES (even zero) once a keyword+location's pool of not-yet-seen
+  // businesses runs low — see the MAX_PAGES cap above.
+  return results.slice(0, MAX_CANDIDATES);
+}
+
+async function fetchSerperPlacesPage(keyword: string, location: string, page: number): Promise<CandidateUrl[]> {
   // Send location both folded into the query text AND as Places' dedicated
   // `location` field. Neither alone is reliable for the casual, free-text
   // input this app's single location box actually gets:
@@ -46,7 +110,7 @@ async function discoverWithSerperPlaces(keyword: string, location: string): Prom
       "X-API-KEY": process.env.SERPER_API_KEY!,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ q: `${keyword} in ${location}`, location, num: MAX_CANDIDATES }),
+    body: JSON.stringify({ q: `${keyword} in ${location}`, location, num: PLACES_PAGE_SIZE, page }),
   });
 
   if (!res.ok) {
@@ -54,10 +118,18 @@ async function discoverWithSerperPlaces(keyword: string, location: string): Prom
   }
 
   const data = (await res.json()) as {
-    places?: { title: string; address?: string; phoneNumber?: string; website?: string; cid?: string }[];
+    places?: {
+      title: string;
+      address?: string;
+      phoneNumber?: string;
+      website?: string;
+      cid?: string;
+      latitude?: number;
+      longitude?: number;
+    }[];
   };
 
-  return (data.places ?? []).slice(0, MAX_CANDIDATES).map((p) => ({
+  return (data.places ?? []).map((p) => ({
     // Prefer the business's own site as the "url" (it's what gets scraped
     // for email); fall back to a Google Maps link so there's always a
     // source URL for verification even when a business has no website.
@@ -67,10 +139,13 @@ async function discoverWithSerperPlaces(keyword: string, location: string): Prom
     knownLocation: p.address,
     knownPhone: p.phoneNumber,
     knownWebsite: p.website,
+    knownLatitude: p.latitude,
+    knownLongitude: p.longitude,
+    knownPlaceId: p.cid,
   }));
 }
 
-async function discoverWithDuckDuckGo(query: string): Promise<CandidateUrl[]> {
+async function discoverWithDuckDuckGo(query: string, excludeDomains: Set<string>): Promise<CandidateUrl[]> {
   const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
   const res = await fetch(url, {
     headers: { "User-Agent": "Mozilla/5.0 (compatible; LeadDiscoveryBot/1.0)" },
@@ -90,7 +165,10 @@ async function discoverWithDuckDuckGo(query: string): Promise<CandidateUrl[]> {
     const href = $(el).attr("href");
     const title = $(el).text().trim();
     const resolved = resolveDuckDuckGoRedirect(href);
-    if (resolved) candidates.push({ url: resolved, title });
+    if (!resolved) return;
+    const domain = extractDomain(resolved);
+    if (domain && excludeDomains.has(domain)) return;
+    candidates.push({ url: resolved, title });
   });
 
   return candidates;

@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { z } from "zod";
 import type { ScrapedPage } from "./scrape";
-import type { ExtractedLead } from "../types";
+import type { ExtractedLead, ExtractedContactDetails } from "../types";
 
 export const leadSchema = z.object({
   isBusinessListing: z.boolean(),
@@ -11,6 +11,8 @@ export const leadSchema = z.object({
   email: z.string().nullable(),
   website: z.string().nullable(),
   description: z.string().nullable(),
+  ownerName: z.string().nullable(),
+  ownerTitle: z.string().nullable(),
 });
 
 let client: OpenAI | null = null;
@@ -36,7 +38,9 @@ Return ONLY a JSON object matching this shape, no prose, no markdown fences:
   "phone": string | null,
   "email": string | null,
   "website": string | null,       // the business's own site, if different from the source page
-  "description": string | null    // one short sentence describing the business
+  "description": string | null,   // one short sentence describing the business
+  "ownerName": string | null,     // name of the owner, founder, director, or a named contact person, if mentioned
+  "ownerTitle": string | null     // that person's role/title (e.g. "Owner", "Founder", "Director"), if mentioned
 }
 If a field is not present in the text, use null. Never invent information.
 If the page is not about a specific business (e.g. it's a directory listing many businesses,
@@ -78,35 +82,37 @@ export async function extractLead(page: ScrapedPage): Promise<ExtractedLead | nu
   }
 }
 
-export const emailDescSchema = z.object({
+export const contactDetailsSchema = z.object({
   email: z.string().nullable(),
   description: z.string().nullable(),
+  ownerName: z.string().nullable(),
+  ownerTitle: z.string().nullable(),
 });
 
-const EMAIL_DESC_SYSTEM_PROMPT = `You are given the text of a business's own website. Extract only:
+const CONTACT_DETAILS_SYSTEM_PROMPT = `You are given the text of a business's own website. Extract only:
 {
-  "email": string | null,      // a contact email address, if present in the text
-  "description": string | null // one short sentence describing what the business does
+  "email": string | null,       // a contact email address, if present in the text
+  "description": string | null, // one short sentence describing what the business does
+  "ownerName": string | null,   // name of the owner, founder, director, or a named contact person, if mentioned
+  "ownerTitle": string | null   // that person's role/title (e.g. "Owner", "Founder", "Director"), if mentioned
 }
-Return ONLY the JSON object, no prose, no markdown fences. If no email is present, use null. Never invent an email.`;
+Return ONLY the JSON object, no prose, no markdown fences. If a field is not present, use null. Never invent information.`;
 
 /**
  * Used for candidates that already came from a structured discovery source
  * (Serper Places) with a known business identity — we don't need the LLM to
- * judge whether the page is a business listing, only to pull out an email
- * and short description from the business's own site, which Maps data
- * doesn't include.
+ * judge whether the page is a business listing, only to pull out the details
+ * Maps data doesn't include: email, description, and — where the site names
+ * one — the owner/contact person and their title.
  */
-export async function extractEmailAndDescription(
-  page: ScrapedPage
-): Promise<{ email: string | null; description: string | null } | null> {
+export async function extractContactDetails(page: ScrapedPage): Promise<ExtractedContactDetails | null> {
   try {
     const completion = await getClient().chat.completions.create({
       model: process.env.GROQ_MODEL ?? "openai/gpt-oss-20b",
       temperature: 0,
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: EMAIL_DESC_SYSTEM_PROMPT },
+        { role: "system", content: CONTACT_DETAILS_SYSTEM_PROMPT },
         {
           role: "user",
           content: `Page title: ${page.title}\nPage URL: ${page.url}\n\nPage text:\n${page.text}`,
@@ -117,7 +123,7 @@ export async function extractEmailAndDescription(
     const raw = completion.choices[0]?.message?.content;
     if (!raw) return null;
 
-    const parsed = emailDescSchema.safeParse(JSON.parse(raw));
+    const parsed = contactDetailsSchema.safeParse(JSON.parse(raw));
     if (!parsed.success) return null;
     return parsed.data;
   } catch {

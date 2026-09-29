@@ -20,11 +20,11 @@ const STEP_ORDER: Record<SearchStatus, number> = {
 export function StatusPanel({ status }: { status: SearchRecord }) {
   if (status.status === "failed") {
     return (
-      <div className="mt-6 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4">
-        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-500" aria-hidden />
+      <div className="mt-6 flex items-start gap-3 rounded-2xl bg-red-950/40 p-4 ring-1 ring-red-500/30">
+        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-400" aria-hidden />
         <div>
-          <p className="font-medium text-red-800">Search failed</p>
-          {status.errorMessage && <p className="mt-1 text-sm text-red-600">{status.errorMessage}</p>}
+          <p className="font-medium text-red-300">Search failed</p>
+          {status.errorMessage && <p className="mt-1 text-sm text-red-400/80">{status.errorMessage}</p>}
         </div>
       </div>
     );
@@ -39,7 +39,7 @@ export function StatusPanel({ status }: { status: SearchRecord }) {
         : 0;
 
   return (
-    <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
+    <div className="mt-6 rounded-2xl bg-slate-900/70 p-5 shadow-card ring-1 ring-white/10 backdrop-blur-xl">
       <div className="flex items-center justify-between gap-4">
         {STEPS.map((step, i) => {
           const isDone = currentIndex > i || status.status === "completed";
@@ -49,12 +49,12 @@ export function StatusPanel({ status }: { status: SearchRecord }) {
             <div key={step.status} className="flex flex-1 items-center">
               <div className="flex flex-col items-center gap-1.5">
                 <div
-                  className={`flex h-9 w-9 items-center justify-center rounded-full border-2 transition-colors ${
+                  className={`relative flex h-9 w-9 items-center justify-center rounded-xl transition-all ${
                     isDone
-                      ? "border-slate-900 bg-slate-900 text-white"
+                      ? "bg-gradient-to-br from-cyan-500/30 to-cyan-500/10 text-cyan-300 shadow-glow-cyan"
                       : isActive
-                        ? "border-slate-900 bg-white text-slate-900"
-                        : "border-slate-200 bg-white text-slate-300"
+                        ? "bg-gradient-to-br from-teal-500/30 to-teal-500/10 text-teal-300 shadow-glow-teal"
+                        : "bg-slate-800 text-slate-600"
                   }`}
                 >
                   {isActive ? (
@@ -62,10 +62,13 @@ export function StatusPanel({ status }: { status: SearchRecord }) {
                   ) : (
                     <Icon className="h-4 w-4" aria-hidden />
                   )}
+                  {isActive && (
+                    <span className="absolute -right-0.5 -top-0.5 h-2 w-2 animate-pulse rounded-full bg-teal-400" />
+                  )}
                 </div>
                 <span
-                  className={`text-xs font-medium ${
-                    isDone || isActive ? "text-slate-900" : "text-slate-400"
+                  className={`font-mono text-[10px] uppercase tracking-wider ${
+                    isDone ? "text-cyan-300" : isActive ? "text-teal-300" : "text-slate-600"
                   }`}
                 >
                   {step.label}
@@ -74,7 +77,7 @@ export function StatusPanel({ status }: { status: SearchRecord }) {
               {i < STEPS.length - 1 && (
                 <div
                   className={`mx-1 mt-[-18px] h-0.5 flex-1 rounded transition-colors ${
-                    isDone ? "bg-slate-900" : "bg-slate-200"
+                    isDone ? "bg-cyan-500/50" : "bg-slate-800"
                   }`}
                 />
               )}
@@ -83,14 +86,14 @@ export function StatusPanel({ status }: { status: SearchRecord }) {
         })}
       </div>
 
-      <div className="mt-5 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+      <div className="mt-5 h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
         <div
-          className="h-full rounded-full bg-slate-900 transition-all duration-500"
+          className="h-full rounded-full bg-gradient-to-r from-teal-500 to-cyan-400 transition-all duration-500"
           style={{ width: `${progressPct}%` }}
         />
       </div>
       {status.candidateCount > 0 && (
-        <p className="mt-2 text-center text-xs text-slate-500">
+        <p className="mt-2 text-center font-mono text-[11px] text-slate-500">
           Processed {status.processedCount} / {status.candidateCount} candidate pages
         </p>
       )}

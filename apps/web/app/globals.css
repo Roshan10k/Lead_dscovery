@@ -1,3 +1,39 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+::selection {
+  background-color: rgba(99, 102, 241, 0.35);
+  color: #eef2ff;
+}
+
+/* Leaflet's tiles still render a white flash while loading; matching the
+   container background avoids a jarring flash against the dark theme. */
+.leaflet-container {
+  background: #0f172a !important;
+}
+
+/* Standard OpenStreetMap tiles are light — invert + hue-rotate turns them
+   dark without depending on a paid/keyed dark-tile provider. Scoped to the
+   tile pane specifically so markers and popups (rendered in separate panes)
+   are unaffected and keep their real colors. */
+.leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9) saturate(0.6);
+}
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+  background: #1e293b !important;
+  color: #e2e8f0 !important;
+}
+.leaflet-control-attribution {
+  background: rgba(15, 23, 42, 0.8) !important;
+  color: #64748b !important;
+}
+.leaflet-control-attribution a {
+  color: #94a3b8 !important;
+}
+.leaflet-control-zoom a {
+  background: #1e293b !important;
+  color: #e2e8f0 !important;
+  border-color: #334155 !important;
+}

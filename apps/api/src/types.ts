@@ -4,12 +4,17 @@ export interface CandidateUrl {
   // Present when discovery came from a structured source (Serper Places /
   // Google Maps data) that already identified a real business. The pipeline
   // trusts these directly instead of asking the LLM to guess business
-  // identity from page text, and only uses the LLM to fill in email/
-  // description from the business's own website.
+  // identity from page text, and only uses the LLM to fill in owner/contact
+  // details from the business's own website.
   knownBusinessName?: string;
   knownLocation?: string;
   knownPhone?: string;
   knownWebsite?: string;
+  knownLatitude?: number;
+  knownLongitude?: number;
+  // Google's stable per-business Place ID (Serper Places' `cid`). Used for
+  // permanent cross-search deduplication — see leads.placeId in schema.ts.
+  knownPlaceId?: string;
 }
 
 export interface ExtractedLead {
@@ -19,4 +24,26 @@ export interface ExtractedLead {
   email: string | null;
   website: string | null;
   description: string | null;
+  ownerName: string | null;
+  ownerTitle: string | null;
+}
+
+/** The narrower extraction result used for structured (Places) candidates. */
+export interface ExtractedContactDetails {
+  email: string | null;
+  description: string | null;
+  ownerName: string | null;
+  ownerTitle: string | null;
+}
+
+/**
+ * Links to a business's own social media profiles, parsed directly out of
+ * its website's HTML (see scrape.ts) rather than by scraping the social
+ * platforms themselves.
+ */
+export interface SocialLinks {
+  facebook?: string;
+  instagram?: string;
+  linkedin?: string;
+  twitter?: string;
 }

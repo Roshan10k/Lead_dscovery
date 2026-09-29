@@ -1,5 +1,30 @@
 import { describe, expect, test } from "bun:test";
-import { csvEscape } from "./csv";
+import { csvEscape, leadsToCsv } from "./csv";
+import type { Lead } from "../db/schema";
+
+function fakeLead(overrides: Partial<Lead> = {}): Lead {
+  return {
+    id: "00000000-0000-0000-0000-000000000001",
+    searchId: "00000000-0000-0000-0000-000000000002",
+    businessName: "Clean Co",
+    location: "Sydney NSW",
+    phone: "+61 2 9189 4164",
+    email: "info@clean-co.com.au",
+    website: "https://commercial-cleaning.com.au",
+    description: "Commercial cleaning in Sydney.",
+    ownerName: null,
+    ownerTitle: null,
+    socialLinks: null,
+    latitude: null,
+    longitude: null,
+    placeId: null,
+    outreachStatus: "new",
+    notes: null,
+    sourceUrl: "https://commercial-cleaning.com.au",
+    createdAt: new Date("2026-01-01T00:00:00Z"),
+    ...overrides,
+  };
+}
 
 describe("csvEscape", () => {
   test("passes plain values through unchanged", () => {
@@ -20,5 +45,47 @@ describe("csvEscape", () => {
 
   test("empty string passes through unchanged", () => {
     expect(csvEscape("")).toBe("");
+  });
+});
+
+describe("leadsToCsv", () => {
+  test("header includes owner, social, and geo columns", () => {
+    const csv = leadsToCsv([]);
+    expect(csv).toBe(
+      "businessName,ownerName,ownerTitle,location,phone,email,website,facebook,instagram,linkedin,twitter,description,outreachStatus,notes,latitude,longitude,sourceUrl"
+    );
+  });
+
+  test("flattens each social platform into its own column", () => {
+    const csv = leadsToCsv([
+      fakeLead({
+        socialLinks: {
+          facebook: "https://facebook.com/cleanco",
+          instagram: "https://instagram.com/cleanco",
+        },
+      }),
+    ]);
+    const [, row] = csv.split("\n");
+    const cols = row.split(",");
+    expect(cols).toContain("https://facebook.com/cleanco");
+    expect(cols).toContain("https://instagram.com/cleanco");
+  });
+
+  test("null fields (owner, social, lat/long) render as empty, not the string 'null'", () => {
+    const csv = leadsToCsv([fakeLead()]);
+    expect(csv).not.toContain("null");
+  });
+
+  test("latitude/longitude render as plain numbers", () => {
+    const csv = leadsToCsv([fakeLead({ latitude: -33.86, longitude: 151.2 })]);
+    const [, row] = csv.split("\n");
+    expect(row).toContain("-33.86");
+    expect(row).toContain("151.2");
+  });
+
+  test("a comma inside a field (e.g. an address) gets quoted, not left to corrupt the column count", () => {
+    const csv = leadsToCsv([fakeLead({ location: "1 Main St, Sydney NSW" })]);
+    const [, row] = csv.split("\n");
+    expect(row).toContain('"1 Main St, Sydney NSW"');
   });
 });

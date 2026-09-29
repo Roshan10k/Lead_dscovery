@@ -21,6 +21,30 @@ beforeAll(() => {
           { headers: { "content-type": "text/html" } }
         );
       }
+      if (url.pathname === "/with-social") {
+        return new Response(
+          `<html><head><title>Clean Co</title></head><body>
+            <nav>
+              <a href="https://www.facebook.com/sharer/sharer.php?u=x">Share</a>
+            </nav>
+            Contact us: info@clean-co.example
+            <footer>
+              <a href="https://www.facebook.com/cleanco">Facebook</a>
+              <a href="https://instagram.com/cleanco/">Instagram</a>
+              <a href="https://www.linkedin.com/company/cleanco">LinkedIn</a>
+              <a href="https://x.com/cleanco">X</a>
+              <a href="https://facebook.com/policies/cookies">Cookie policy</a>
+            </footer>
+          </body></html>`,
+          { headers: { "content-type": "text/html" } }
+        );
+      }
+      if (url.pathname === "/no-social") {
+        return new Response(
+          `<html><head><title>Clean Co</title></head><body>No social links here.</body></html>`,
+          { headers: { "content-type": "text/html" } }
+        );
+      }
       if (url.pathname === "/not-found") {
         return new Response("nope", { status: 404 });
       }
@@ -60,5 +84,27 @@ describe("scrapePage", () => {
   test("returns null for an unreachable host rather than throwing", async () => {
     const page = await scrapePage("http://localhost:1/unreachable");
     expect(page).toBeNull();
+  });
+});
+
+describe("scrapePage social link extraction", () => {
+  test("extracts social links from the footer, which script/nav/footer text-stripping would otherwise remove first", async () => {
+    const page = await scrapePage(`${server.url}with-social`);
+    expect(page?.socialLinks.facebook).toBe("https://www.facebook.com/cleanco");
+    expect(page?.socialLinks.instagram).toBe("https://instagram.com/cleanco/");
+    expect(page?.socialLinks.linkedin).toBe("https://www.linkedin.com/company/cleanco");
+    expect(page?.socialLinks.twitter).toBe("https://x.com/cleanco");
+  });
+
+  test("excludes utility paths (share dialogs, policy pages) rather than mistaking them for a profile link", async () => {
+    const page = await scrapePage(`${server.url}with-social`);
+    // The sharer.php link in <nav> and the /policies/ link in <footer> must
+    // not overwrite the real facebook.com/cleanco profile link.
+    expect(page?.socialLinks.facebook).toBe("https://www.facebook.com/cleanco");
+  });
+
+  test("returns an empty object when a page has no social links, not undefined/null", async () => {
+    const page = await scrapePage(`${server.url}no-social`);
+    expect(page?.socialLinks).toEqual({});
   });
 });

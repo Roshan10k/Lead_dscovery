@@ -1,9 +1,15 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { JetBrains_Mono } from "next/font/google";
+import { GeistSans } from "geist/font/sans";
+import "leaflet/dist/leaflet.css";
 import "./globals.css";
 import { Providers } from "./providers";
 
-const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-jetbrains-mono",
+  weight: ["400", "500", "600"],
+});
 
 export const metadata: Metadata = {
   title: "Lead Discovery",
@@ -12,8 +18,8 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={inter.variable}>
-      <body className="min-h-screen bg-slate-50 font-sans text-slate-900 antialiased">
+    <html lang="en" className={`${GeistSans.variable} ${jetbrainsMono.variable}`}>
+      <body className="min-h-screen bg-slate-950 font-sans text-slate-100 antialiased">
         <Providers>{children}</Providers>
       </body>
     </html>

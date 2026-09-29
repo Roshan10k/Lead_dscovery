@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { leadSchema, emailDescSchema } from "./extract";
+import { leadSchema, contactDetailsSchema } from "./extract";
 
 describe("leadSchema (full extraction, DuckDuckGo path)", () => {
   test("accepts a well-formed business listing", () => {
@@ -11,6 +11,8 @@ describe("leadSchema (full extraction, DuckDuckGo path)", () => {
       email: "info@clean-co.com.au",
       website: "https://commercial-cleaning.com.au",
       description: "Commercial cleaning in Sydney.",
+      ownerName: "Jane Smith",
+      ownerTitle: "Owner",
     });
     expect(result.success).toBe(true);
   });
@@ -24,6 +26,8 @@ describe("leadSchema (full extraction, DuckDuckGo path)", () => {
       email: null,
       website: null,
       description: null,
+      ownerName: null,
+      ownerTitle: null,
     });
     expect(result.success).toBe(true);
   });
@@ -42,6 +46,8 @@ describe("leadSchema (full extraction, DuckDuckGo path)", () => {
       email: null,
       website: null,
       description: null,
+      ownerName: null,
+      ownerTitle: null,
     });
     expect(result.success).toBe(false);
   });
@@ -55,28 +61,42 @@ describe("leadSchema (full extraction, DuckDuckGo path)", () => {
       email: null,
       website: null,
       description: null,
+      ownerName: null,
+      ownerTitle: null,
     });
     expect(result.success).toBe(true);
     expect(result.success && result.data.isBusinessListing).toBe(false);
   });
 });
 
-describe("emailDescSchema (Places path — email/description only)", () => {
-  test("accepts an email and description", () => {
-    const result = emailDescSchema.safeParse({
+describe("contactDetailsSchema (Places path — email/description/owner only)", () => {
+  test("accepts an email, description, and owner details", () => {
+    const result = contactDetailsSchema.safeParse({
       email: "info@clean-co.com.au",
       description: "Commercial cleaning in Sydney.",
+      ownerName: "Jane Smith",
+      ownerTitle: "Founder",
     });
     expect(result.success).toBe(true);
   });
 
   test("accepts nulls when nothing was found on the page", () => {
-    const result = emailDescSchema.safeParse({ email: null, description: null });
+    const result = contactDetailsSchema.safeParse({
+      email: null,
+      description: null,
+      ownerName: null,
+      ownerTitle: null,
+    });
     expect(result.success).toBe(true);
   });
 
+  test("rejects a payload missing required keys", () => {
+    const result = contactDetailsSchema.safeParse({ email: null, description: null });
+    expect(result.success).toBe(false);
+  });
+
   test("rejects a non-JSON-shaped / garbage payload", () => {
-    const result = emailDescSchema.safeParse("not an object");
+    const result = contactDetailsSchema.safeParse("not an object");
     expect(result.success).toBe(false);
   });
 });
